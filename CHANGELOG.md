@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A PR card draws its `impact`, what the change reaches in forward-deployed engineers' code, right under its Summary as `FDE impact`. Before, the card had no field for it, so an Approve could be given on a card that named none of the callers a changed default reached.
+
 ### Changed
 
 - A reply of yours in a PR card's thread goes to its `card_command` as a `Words` answer, beside reaching the session as before. When the program takes back an Approve you gave before writing it, the card shows Approve and Hold again. Before, only the session heard the reply, and it took minutes to act on it, so a PR you had approved and Trunk had queued could merge after you objected under its card.
