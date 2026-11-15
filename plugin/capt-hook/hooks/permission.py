@@ -162,6 +162,7 @@ class Message:
     from_user: bool = False
     from_claude: bool = False
     from_bot: bool = False
+    answer: str = ""
 
     @property
     def human(self) -> bool:
@@ -270,7 +271,7 @@ def read_thread(conv: Conversation) -> Thread:
     read = json.loads(out)
     return Thread(
         tuple(
-            Message(message["ts"], message.get("user", ""), message.get("user_name", ""), message.get("text", ""), bool(message.get("from_user")), bool(message.get("from_claude")), bool(message.get("from_bot")))
+            Message(message["ts"], message.get("user", ""), message.get("user_name", ""), message.get("text", ""), bool(message.get("from_user")), bool(message.get("from_claude")), bool(message.get("from_bot")), message.get("answer", ""))
             for message in read["messages"]
         ),
     )
@@ -701,7 +702,8 @@ def own_dm(channel: str) -> bool:
 
 
 def linked_orders(ctx: Context, delivered: set[str]) -> list[Evidence]:
-    links = {(channel, thread or f"{seconds}.{micros}", f"{seconds}.{micros}") for text in words_and_calls(ctx) for channel, seconds, micros, thread in DM_LINK.findall(text) if f"operator:{channel}/{seconds}.{micros}" not in delivered}
+    texts = [*words_and_calls(ctx), *live(ctx).input.raw.get("asked", ())]
+    links = {(channel, thread or f"{seconds}.{micros}", f"{seconds}.{micros}") for text in texts for channel, seconds, micros, thread in DM_LINK.findall(text) if f"operator:{channel}/{seconds}.{micros}" not in delivered}
     owned = {channel for channel in {link[0] for link in links} if own_dm(channel)}
     found = []
     for channel, thread in {(channel, thread) for channel, thread, _ in links if channel in owned}:
@@ -711,8 +713,10 @@ def linked_orders(ctx: Context, delivered: set[str]) -> list[Evidence]:
             continue
         found += [
             order(channel, message.ts, message.text, "the user's own message in their DM with the app, read back from Slack")
+            if message.operator
+            else order(channel, message.ts, message.answer, f"the user's answer on the app's card in their DM with it, which reads: {message.text}")
             for message in messages
-            if (channel, thread, message.ts) in links and message.operator
+            if (channel, thread, message.ts) in links and (message.operator or message.answer)
         ]
     return found
 
@@ -1183,6 +1187,13 @@ ASKED_TEXT = "did the fix for her bug ship?"
 HIS_QUESTION = {"ts": ASKED_TS, "user": "U0OWNER0001", "user_name": "Wren", "text": ASKED_TEXT, "from_user": True}
 ASKED_ID = f"operator:{FOLLOWERS}/{ASKED_TS}"
 SHIPPED = DANA | {"text": "It shipped this morning, and her chats open again."}
+CARD_TS = "1794714096.102999"
+CARD_ID = f"operator:{OWNER_DM}/{CARD_TS}"
+CARD_ASKED = "Post the fix notes to the authors who reported the bug, as drafted?"
+CARD_PICK = "Live authors now: DM Sam as written; later ones go out on your standing word"
+CARD_URL = f"https://acme.slack.com/archives/{OWNER_DM}/p{CARD_TS.replace('.', '')}"
+CARD_BRIEF = f"Record: 711482\nMessage (his words): post the fix note to Sam\nLink: {CARD_URL}"
+SAM_TOLD = {"channel_id": SAM_USER, "text": "Hey Sam, the fix for the bug you reported is live."}
 ALERTS = "C0ALERTS001"
 ROLLOUT_THREAD = "1794512248.483749"
 CLONE_THREAD = "1794411410.710549"
@@ -1244,6 +1255,12 @@ def dm_arrived(ts: str = ORDER_TS, *, text: str = ORDER_TEXT, operator: bool = T
     payload = {"type": "slack.message", "kind": "channel", "channel_id": channel, "thread_ts": thread or ts, "ts": ts, "user": "U0OWNER0001", "user_name": "Wren", "from_claude": False, "text": text, "permalink": order_url(ts), "operator": operator}
     tag = f'<channel source="{server}" subject_id="s1" type="slack.message">\n{json.dumps(payload, separators=(",", ":"))}\n</channel>'
     return [T.user(tag, isMeta=True, origin={"kind": "channel", "server": server}), T.assistant("on it")]
+
+
+def card_answered(answer: str = CARD_PICK, *, own: bool = True) -> dict[str, str | tuple[int, str]]:
+    peer = {"peer": "U0OWNER0001", "peer_name": "Wren", "own": own}
+    card = {"ts": CARD_TS, "user": "U0APPBOT001", "user_name": "cc-slack", "text": CARD_ASKED, "from_claude": True, "from_bot": True} | ({"answer": answer} if answer else {})
+    return SAM_DM | {f"{CC_SLACK} dm-peer --channel {OWNER_DM}": json.dumps(peer), f"{CC_SLACK} thread --json --channel {OWNER_DM}": json.dumps({"messages": [card]})}
 
 
 def briefed(ts: str = ORDER_TS) -> dict[str, Any]:
@@ -1620,6 +1637,11 @@ on(
             case(**briefed(), commands=owner_dm(own=False), decide=jev(ORDER_ID)) >> DENY,
             case(**briefed(), commands=owner_dm(from_user=False), decide=jev(ORDER_ID)) >> DENY,
             case(**briefed(STALE_TS), commands=owner_dm(ts=STALE_TS), decide=jev(f"operator:{OWNER_DM}/{STALE_TS}")) >> Rewrite(ticket_agent="a-lane"),
+            case(SAM_TOLD, tool=DRIVE_SAY, **said(CARD_BRIEF), commands=card_answered(), decide=jev(CARD_ID)) >> ALLOW,
+            case(SAM_TOLD, tool=DRIVE_SAY, **said(CARD_BRIEF), commands=card_answered(""), decide=jev(CARD_ID)) >> DENY,
+            case(SAM_TOLD, tool=DRIVE_SAY, **said(CARD_BRIEF), commands=card_answered(own=False), decide=jev(CARD_ID)) >> DENY,
+            case(SAM_TOLD | {"asked": [CARD_URL]}, tool=DRIVE_SAY, **said("status?"), commands=card_answered(), decide=jev(CARD_ID)) >> ALLOW,
+            case(SAM_TOLD, tool=DRIVE_SAY, **said("status?"), commands=card_answered(), decide=jev(CARD_ID)) >> DENY,
             case(transcript=dm_arrived(), tickets=[posted_once(evidence=(ORDER,))], decide=jev(ORDER_ID)) >> ALLOW,
             case(SHIPPED, transcript=[T.user("status?")], root_transcript=dm_arrived(), agent_id="a-lane", tickets=[posted_once(evidence=(ORDER,))], commands=ruled(SOLVED_GRANT) | thread_read(DANA_OPENED, BOT_ANSWERED), decide=jev(ORDER_ID)) >> Rewrite(ticket_agent="a-lane"),
             case(transcript=dm_arrived()) >> DENY,
