@@ -651,7 +651,10 @@ func (p *poller) cardAction(ctx context.Context, id identity, a cardActionPush) 
 		p.noteTap(ctx, id, a.ref(), card.ref(), at, "⚠️ *"+mrkdwnEscapes.Replace(k.Label)+"* was not taken: "+why)
 		err = nil
 	}
-	p.readBack(ctx, id, a, card, k, err)
+	if told := p.readBack(ctx, id, a, card, k, err); told && err != nil {
+		p.log.Printf("card action %s on %s: reported in its thread, so it is not taken again: %v", a.ActionID, a.MessageTS, err)
+		return nil
+	}
 	return err
 }
 
@@ -809,26 +812,28 @@ func notedBlocks(blocks []slack.Block, line string) []slack.Block {
 	return append(kept, mrkdwn(cardTapNoteBlock, line))
 }
 
-func (p *poller) readBack(ctx context.Context, id identity, tapped, card cardActionPush, k askTap, tapErr error) {
+func (p *poller) readBack(ctx context.Context, id identity, tapped, card cardActionPush, k askTap, tapErr error) bool {
 	api := p.newAPI(id.Token)
 	r := tapped.ref()
 	post, err := messageAt(ctx, api, r.channel, r.thread, r.ts)
 	if err != nil {
 		p.log.Printf("card %s/%s: its tap cannot be read back: %v", r.thread, r.ts, err)
-		return
+		return false
 	}
 	if tapShows(post, tapped.ActionID, slackTime(tapped.ActionTS)) {
-		return
+		return false
 	}
 	if ans, done := p.cards.answer(card.Channel, card.ThreadTS, k.ID); k.ID != "" && done && post.Text == cardCopyLead {
 		p.answerCopy(ctx, id, api, card.ref(), r, post, ans)
-		return
+		return false
 	}
 	line := p.unshownTap(card, k, tapErr)
 	p.log.Printf("card %s/%s: tap read back unchanged: %s", r.thread, r.ts, line)
 	if _, _, err := api.PostMessageContext(ctx, r.channel, id.postOptions(line, r.thread)...); err != nil {
 		p.log.Printf("card %s/%s: its unchanged tap is not reported in the thread: %v", r.thread, r.ts, err)
+		return false
 	}
+	return true
 }
 
 func (p *poller) answerCopy(ctx context.Context, id identity, api slackAPI, card, copied cardRef, post slack.Message, ans askAnswer) {

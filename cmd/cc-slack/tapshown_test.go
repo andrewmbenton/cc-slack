@@ -631,3 +631,60 @@ func TestAnExplainMoreOnACardWhoseSessionEndedReachesTheSessionHoldingTheDM(t *t
 		t.Fatalf("card command asked %v, want no answer, since Explain more answers nothing", got)
 	}
 }
+
+func TestTheUndoOnAnAnsweredCopyNamesTheCardsChannelAndTakesTheAnswerBack(t *testing.T) {
+	l := startDaemon(t)
+	loggedIn(t, l)
+	c := postWaiting(t, l, mergeCard())
+	copied, merge := copyCard(t, l, c.url(), postThread(t, l, "About the merge."))
+	picked := time.Now()
+	l.tap(c.id, cardActionPush{User: testUser, Channel: c.id.DMChannelID, MessageTS: copied.ts, ThreadTS: copied.threadTS,
+		ActionID: merge.ActionID, Value: merge.Value, ActionTS: fmt.Sprintf("%d.000100", picked.Unix()), Seq: "001800000100000-abcd0701"})
+	edits := editsOf(l.slack.edited(), copied.ts)
+	if len(edits) == 0 {
+		t.Fatal("the copy was never redrawn answered")
+	}
+	undos := slices.DeleteFunc(copiedButtonsOf(t, fakePost{blocks: edits[len(edits)-1]}), func(b *slack.ButtonBlockElement) bool {
+		return !strings.Contains(b.ActionID, cardUndoAction)
+	})
+	if len(undos) != 1 || !strings.HasPrefix(undos[0].ActionID, cardCopyAction+c.id.DMChannelID+"/"+c.ts+":") {
+		t.Fatalf("copy buttons = %+v, want one Undo naming the card's own channel and message", undos)
+	}
+	if card, _ := (cardActionPush{Channel: platformChannel, ActionID: undos[0].ActionID}).onCard(); card.Channel != c.id.DMChannelID || card.MessageTS != c.ts {
+		t.Fatalf("an Undo tapped on a copy in another channel resolves %s/%s, want the card %s/%s", card.Channel, card.MessageTS, c.id.DMChannelID, c.ts)
+	}
+
+	l.tap(c.id, cardActionPush{User: testUser, Channel: c.id.DMChannelID, MessageTS: copied.ts, ThreadTS: copied.threadTS,
+		ActionID: undos[0].ActionID, ActionTS: fmt.Sprintf("%d.000200", picked.Add(time.Minute).Unix()), Seq: "001800000100000-abcd0702"})
+
+	if _, done := l.app.cards.answer(c.id.DMChannelID, c.thread, "step-3:merge"); done {
+		t.Fatal("the Undo on the copy left the answer on record")
+	}
+	if got := l.slack.sent(); slices.ContainsFunc(got, func(p fakePost) bool { return strings.Contains(p.text, "did not change this message") }) {
+		t.Fatalf("posted %+v, want no warning for an Undo that took the answer back", got)
+	}
+}
+
+func TestATapThatFailsIsReportedOnceAndNotTakenAgain(t *testing.T) {
+	l := startDaemon(t)
+	loggedIn(t, l)
+	c := postWaiting(t, l, mergeCard())
+	copied, merge := copyCard(t, l, c.url(), postThread(t, l, "About the merge."))
+	l.app.cards.mu.Lock()
+	clear(l.app.cards.threads)
+	l.app.cards.mu.Unlock()
+	l.slack.fail(repliesOf(c.id.DMChannelID, c.ts), slack.SlackErrorResponse{Err: "thread_not_found"})
+	sent := len(l.slack.sent())
+	push := cardActionPush{User: testUser, Channel: c.id.DMChannelID, MessageTS: copied.ts, ThreadTS: copied.threadTS,
+		ActionID: merge.ActionID, Value: merge.Value, ActionTS: "1800000100.000000", Seq: "001800000100000-abcd0703"}
+
+	l.tap(c.id, push)
+
+	warned := slices.DeleteFunc(l.slack.sent()[sent:], func(p fakePost) bool { return !strings.Contains(p.text, "thread_not_found") })
+	if len(warned) != 1 || warned[0].threadTS != copied.threadTS {
+		t.Fatalf("posted %+v, want one warning under the copy naming why the tap was not taken", warned)
+	}
+	if l.app.replay.latest() != push.Seq {
+		t.Fatalf("replay cursor = %q, want it past the reported tap so it is not delivered and reported again", l.app.replay.latest())
+	}
+}

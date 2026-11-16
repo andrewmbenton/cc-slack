@@ -169,8 +169,12 @@ func answers(actionID string) bool {
 
 func copiedAnswer(b *slack.ButtonBlockElement, ref permalinkRef) *slack.ButtonBlockElement {
 	answer := *b
-	answer.ActionID = cardCopyAction + ref.channelID + "/" + ref.ts + ":" + b.ActionID
+	answer.ActionID = copyActionID(ref.channelID, ref.ts, b.ActionID)
 	return &answer
+}
+
+func copyActionID(channel, ts, action string) string {
+	return cardCopyAction + channel + "/" + ts + ":" + action
 }
 
 func copiedButtons(actions *slack.ActionBlock, ref permalinkRef) (answered, links []slack.BlockElement) {
@@ -264,7 +268,7 @@ func (l *liveCards) redrawCopies(ctx context.Context, id identity, card cardRef)
 func markCopy(ctx context.Context, api slackAPI, id identity, card, copied cardRef, post slack.Message, line, undo string) error {
 	blocks := []slack.Block{post.Blocks.BlockSet[0], mrkdwn(cardCopyBlock+"-answered", line+" · "+slackLink(id.permalink(card.channel, card.ts, card.thread), "see the card"))}
 	if undo != "" {
-		blocks = append(blocks, slack.NewActionBlock(cardCopyBlock+"-undo", button(cardCopyAction+card.ts+":"+cardUndoAction+undo, cardUndoLabel)))
+		blocks = append(blocks, slack.NewActionBlock(cardCopyBlock+"-undo", button(copyActionID(card.channel, card.ts, cardUndoAction+undo), cardUndoLabel)))
 	}
 	_, _, _, err := api.UpdateMessageContext(ctx, copied.channel, copied.ts, textOption(post.Text), slack.MsgOptionBlocks(blocks...), slack.MsgOptionAttachments([]slack.Attachment{}...))
 	return err
