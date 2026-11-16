@@ -104,15 +104,15 @@ func TestLoginPostsAsTheHandleWithoutADisplayName(t *testing.T) {
 	}
 }
 
-func TestAPostDrawsOnlyAnOpenCardItLinks(t *testing.T) {
+func TestAPostUnfurlsOnlyTheSlackMessagesAndOpenCardsItLinks(t *testing.T) {
 	message := "https://example.slack.com/archives/C1/p1793818357021259"
 	for _, tc := range []struct {
 		name, want string
 		text       func(card postedCard) string
 	}{
 		{"an open card under the words that name it", "true", func(c postedCard) string { return "card: <" + c.url() + "|the merge card>" }},
-		{"his own message", "false", func(postedCard) string { return "your order: <" + message + "|your words>" }},
-		{"a message in a thread", "false", func(postedCard) string { return "see " + message + "?thread_ts=1793818357.021259" }},
+		{"his own message, shown as Slack's embed of it", "true", func(postedCard) string { return "your order: <" + message + "|your words>" }},
+		{"a message in a thread, shown as Slack's embed of it", "true", func(postedCard) string { return "see " + message + "?thread_ts=1793818357.021259" }},
 		{"any other link", "false", func(postedCard) string { return "see <https://example.com/a|a>" }},
 		{"no link", "false", func(postedCard) string { return "plain words" }},
 	} {
@@ -143,7 +143,7 @@ func TestAPostInAThreadWritesALinkToTheMessageItIsUnderAsItsWords(t *testing.T) 
 	}{
 		{"its link under words", "The design job behind <" + parent.Permalink + "|the tally question> has your question", "The design job behind the tally question has your question", "false"},
 		{"its bare link", "Answered in " + parent.Permalink + "?thread_ts=" + parent.TS, "Answered in this thread", "false"},
-		{"another message's link", "Asked beside <" + other.Permalink + "|the cache question>", "", "false"},
+		{"another message's link", "Asked beside <" + other.Permalink + "|the cache question>", "", "true"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l.post(opReply, map[string]any{"channel_id": testChannel, "thread_ts": parent.TS, "text": tc.text})

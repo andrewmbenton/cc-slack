@@ -22,7 +22,7 @@ type linkDraw struct {
 
 func (l *liveCards) linkDrawIn(channel, thread, at, text string, blocks []slack.Block, unfurled bool) linkDraw {
 	d := linkDraw{channel: channel, thread: thread, unfurled: unfurled}
-	plain := false
+	shown, message := false, false
 	for _, ref := range linkedRefs(text, blocks) {
 		if ref.channelID == channel && ref.ts == thread {
 			continue
@@ -31,9 +31,14 @@ func (l *liveCards) linkDrawIn(channel, thread, at, text string, blocks []slack.
 			d.cards = append(d.cards, card)
 			continue
 		}
-		plain = true
+		if _, m := l.liveMessage(ref.channelID, ref.ts); m != nil {
+			shown = true
+			continue
+		}
+		message = true
 	}
-	d.inline = len(d.cards) > 0 && (!plain || unfurled) && !slices.ContainsFunc(d.cards, func(card cardRef) bool { return card.channel != channel })
+	d.unfurled = unfurled || message && !shown
+	d.inline = len(d.cards) > 0 && (!shown || unfurled) && !slices.ContainsFunc(d.cards, func(card cardRef) bool { return card.channel != channel })
 	if d.inline {
 		d.post = strconv.FormatInt(time.Now().UnixNano()+freshPosts.Add(1), 36)
 	}
