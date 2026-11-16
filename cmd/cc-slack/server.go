@@ -53,7 +53,7 @@ type app struct {
 
 func jitter() float64 { return rand.Float64()*2 - 1 } //nolint:gosec // G404: schedule jitter, not a secret
 
-func newApp(newAPI func(token string) slackAPI, alive func(pid int) bool, cache *readCache, owed *owedReplies, feeds *feedStore, threads *dmThreads, replay *replayCursor) *app {
+func newApp(newAPI func(token string) slackAPI, alive func(pid int) bool, cache *readCache, owed *owedReplies, holds *deliveryHolds, feeds *feedStore, threads *dmThreads, replay *replayCursor) *app {
 	newAPI = cache.expiring(newAPI)
 	avatars := newAvatarStore(&http.Client{Timeout: 30 * time.Second})
 	shortcuts := &shortcutHandler{
@@ -91,6 +91,7 @@ func newApp(newAPI func(token string) slackAPI, alive func(pid int) bool, cache 
 		now:       time.Now,
 		cache:     cache,
 		owed:      owed,
+		holds:     holds,
 		feeds:     feeds,
 		threads:   threads,
 		replay:    replay,
@@ -101,7 +102,6 @@ func newApp(newAPI func(token string) slackAPI, alive func(pid int) bool, cache 
 		paused:    map[string]time.Time{},
 		pending:   map[cursorKey]uint64{},
 		since:     map[cursorKey]string{},
-		streams:   map[string]int{},
 		compact:   map[string]transcriptMark{},
 		edits:     map[string]bool{},
 		log:       log.New(os.Stderr, "["+binaryName+" poller] ", log.LstdFlags),
@@ -219,6 +219,11 @@ func serve(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = owed.Close() }()
+	holds, err := openDeliveryHolds(ctx, deliveryHoldsPath())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = holds.Close() }()
 	feeds, err := openFeeds(ctx, feedsPath())
 	if err != nil {
 		return err
@@ -233,7 +238,7 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	a := newApp(cachedSlackAPI(), procs.LiveClaude, cache, owed, feeds, threads, replay)
+	a := newApp(cachedSlackAPI(), procs.LiveClaude, cache, owed, holds, feeds, threads, replay)
 	defer func() { _ = a.cards.close() }()
 	s, err := a.buildServer()
 	if err != nil {

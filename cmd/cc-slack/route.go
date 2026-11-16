@@ -410,8 +410,12 @@ func (p *poller) handBack(ctx context.Context, db *sql.DB, id identity, live []w
 }
 
 func (p *poller) deliverTopLevel(ctx context.Context, w watch, d delivery) error {
-	if d.base == eventMessage && p.streamed(w.SubjectID) {
-		_, err := p.appendEvent(ctx, w.SubjectID, d.origin, eventStreamed, d.payload(eventStreamed), d.dedup)
+	streamed, err := p.holds.streamed(ctx, w.SubjectID)
+	if err != nil {
+		return err
+	}
+	if d.base == eventMessage && streamed {
+		_, err = p.appendEvent(ctx, w.SubjectID, d.origin, eventStreamed, d.payload(eventStreamed), d.dedup)
 		return err
 	}
 	seq, err := p.appendEvent(ctx, w.SubjectID, d.origin, d.base, d.payload(d.base), d.dedup)
@@ -422,19 +426,6 @@ func (p *poller) deliverTopLevel(ctx context.Context, w watch, d delivery) error
 		return fmt.Errorf("direct top level: %w", err)
 	}
 	return nil
-}
-
-func (p *poller) holdDelivery(subjectID string, pid int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.streams[subjectID] = pid
-}
-
-func (p *poller) streamed(subjectID string) bool {
-	p.mu.Lock()
-	pid, held := p.streams[subjectID]
-	p.mu.Unlock()
-	return held && p.alive(pid)
 }
 
 func (p *poller) ownerStopped(ctx context.Context, db *sql.DB, subjectID, agentID string, endedAt int64) error {

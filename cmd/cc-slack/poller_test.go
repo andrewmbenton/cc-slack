@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -473,12 +476,15 @@ func TestPollerRoutesDMsFromTheOperatorOnly(t *testing.T) {
 	}
 }
 
-func TestAHeldStreamAloneCarriesTheMessageWhileItRuns(t *testing.T) {
+func TestAHeldStreamAloneCarriesTheMessageWhileItRunsAcrossARestart(t *testing.T) {
 	f := newFixture(t)
 	f.watch(agent.TopLevel, testThread)
-	stream := testPID + 1
-	f.alive[stream] = true
-	f.poller.holdDelivery(testSubject, stream)
+	path := filepath.Join(t.TempDir(), "delivery-holds.db")
+	f.poller.holds = reopenTestHolds(t, path)
+	if err := f.poller.holds.hold(f.ctx, testSubject, os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	f.poller.holds = reopenTestHolds(t, path)
 
 	f.slack.add(testChannel, reply("1800000000.000200", "while it runs"))
 	f.tick()
@@ -490,7 +496,17 @@ func TestAHeldStreamAloneCarriesTheMessageWhileItRuns(t *testing.T) {
 		t.Fatalf("event = %s %s, want the streamed message", last.Type, last.Payload)
 	}
 
-	f.alive[stream] = false
+	stream := exec.Command("sleep", "60")
+	if err := stream.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.poller.holds.hold(f.ctx, testSubject, stream.Process.Pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = stream.Wait()
 	f.slack.add(testChannel, reply("1800000000.000300", "after it exits"))
 	f.nudgeThread()
 	f.tick()

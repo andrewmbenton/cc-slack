@@ -1983,7 +1983,9 @@ func (a *app) handleHoldDelivery(hc daemon.HandlerCtx) daemon.Reply {
 	if !found {
 		return fail("no cc-slack session for this Claude window, so it has no messages to hold")
 	}
-	a.poller.holdDelivery(sub.ID, b.StreamPID)
+	if err := a.poller.holds.hold(hc.Ctx, sub.ID, b.StreamPID); err != nil {
+		return fail(err.Error())
+	}
 	return ok(map[string]any{"held": sub.ID})
 }
 

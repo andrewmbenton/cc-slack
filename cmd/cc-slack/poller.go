@@ -56,6 +56,7 @@ type poller struct {
 	now       func() time.Time
 	cache     *readCache
 	owed      *owedReplies
+	holds     *deliveryHolds
 	feeds     *feedStore
 	threads   *dmThreads
 	replay    *replayCursor
@@ -71,7 +72,6 @@ type poller struct {
 	marks   uint64
 	pending map[cursorKey]uint64
 	since   map[cursorKey]string
-	streams map[string]int
 	compact map[string]transcriptMark
 	held    []heldAck
 	edits   map[string]bool
