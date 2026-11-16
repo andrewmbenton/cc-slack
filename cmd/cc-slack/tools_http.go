@@ -187,39 +187,13 @@ func ticketed(body []byte, logger *log.Logger) ([]byte, error) {
 	if use == "" || strings.ContainsAny(use, "/\\") || params.Name == "slack_revoke" {
 		return body, nil
 	}
-	dir, err := ticketsDir()
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, use+".json")
-	raw, err := os.ReadFile(path) //nolint:gosec // G304: the name is a tool use id with no path separator, under cc-slack's own state.
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
 	if params.Arguments == nil {
 		params.Arguments = map[string]json.RawMessage{}
 	}
-	delete(params.Arguments, "ticket_unhooked")
-	_, typed := params.Arguments["ticket_id"]
-	switch {
-	case err == nil:
-		_ = os.Remove(path)
-		for name := range params.Arguments {
-			if strings.HasPrefix(name, "ticket_") {
-				delete(params.Arguments, name)
-			}
-		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &fields); err != nil {
-			return nil, fmt.Errorf("ticket file %s: %w", path, err)
-		}
-		delete(fields, "session")
-		maps.Copy(params.Arguments, fields)
-	case !typed:
-		if params.Arguments["ticket_unhooked"], err = json.Marshal(params.Name + " " + use); err != nil {
-			return nil, err
-		}
+	if err := takeKeptTicket(params.Arguments, params.Name, use); err != nil {
+		return nil, err
 	}
+	var err error
 	var whole map[string]json.RawMessage
 	if err := json.Unmarshal(req["params"], &whole); err != nil {
 		return nil, err
@@ -231,6 +205,39 @@ func ticketed(body []byte, logger *log.Logger) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(req)
+}
+
+func takeKeptTicket(args map[string]json.RawMessage, tool, use string) error {
+	dir, err := ticketsDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, use+".json")
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the name is a tool use id with no path separator, under cc-slack's own state.
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	delete(args, "ticket_unhooked")
+	if err != nil {
+		if _, typed := args["ticket_id"]; typed {
+			return nil
+		}
+		args["ticket_unhooked"], err = json.Marshal(tool + " " + use)
+		return err
+	}
+	_ = os.Remove(path)
+	for name := range args {
+		if strings.HasPrefix(name, "ticket_") {
+			delete(args, name)
+		}
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return fmt.Errorf("ticket file %s: %w", path, err)
+	}
+	delete(fields, "session")
+	maps.Copy(args, fields)
+	return nil
 }
 
 func rpcReply(out, id json.RawMessage) ([]byte, error) {

@@ -845,7 +845,7 @@ def context_of(evt: ToolHookEvent, write: Write, conv: Conversation) -> Context:
     return ctx
 
 
-def bounded(work: Callable[[], HookResult]) -> HookResult:
+def bounded(work: Callable[[], HookResult | None]) -> HookResult | None:
     left = reqenv.seconds_left()
     seconds = CHECK_SECONDS if left is None else max(0.0, min(CHECK_SECONDS, left - DEADLINE_MARGIN))
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=GATE)
@@ -857,11 +857,11 @@ def bounded(work: Callable[[], HookResult]) -> HookResult:
         pool.shutdown(wait=False)
 
 
-def named_ticket(evt: PreToolUseEvent, ctx: Context, ticket: Ticket) -> HookResult:
+def named_ticket(evt: PreToolUseEvent, ctx: Context, ticket: Ticket) -> HookResult | None:
     fields = {"ticket_id": ticket.id, "ticket_tree": ticket.tree, "ticket_agent": ctx.agent, "ticket_call": ctx.call, "ticket_fingerprint": ctx.action.fingerprint}
     if evt.tool_name != "Bash":
         kept_ticket(evt, fields)
-        return evt.allow() if evt.tool_name in FILED_TOOLS else evt.rewrite(dict(evt.input.raw) | fields)
+        return None if evt.tool_name in FILED_TOOLS else evt.rewrite(dict(evt.input.raw) | fields)
     call = cli_calls(evt)[0][0]
     head, _, tail = evt.input.raw["command"].partition(call.command.raw)
     flags = " ".join(f"--{TICKET_FLAGS[name]} {shlex.quote(value)}" for name, value in fields.items())
@@ -893,7 +893,9 @@ def unchecked(evt: PreToolUseEvent, write: Write, conv: Conversation, exc: Excep
     if not write.daemon:
         return evt.allow(system_message=note)
     ctx = context_of(evt, write, conv)
-    return replace(named_ticket(evt, ctx, SLACK.unchecked(ctx, cause)), system_message=note)
+    if (named := named_ticket(evt, ctx, SLACK.unchecked(ctx, cause))) is None:
+        return evt.allow(system_message=note)
+    return replace(named, system_message=note)
 
 
 def written_files(evt: PreToolUseEvent) -> set[str]:
@@ -945,7 +947,7 @@ def slack_writes_need_permission(evt: PreToolUseEvent) -> HookResult | None:
         return unchecked(evt, write, resolved[0], exc)
 
 
-def drive_write(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]) -> HookResult:
+def drive_write(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]) -> HookResult | None:
     if not write.daemon:
         return evt.allow()
     resolved[0] = conversation(write)
@@ -954,7 +956,7 @@ def drive_write(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]
     return named_ticket(evt, ctx, SLACK.unchecked(ctx, DRIVE_WRITE))
 
 
-def judged(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]) -> HookResult:
+def judged(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]) -> HookResult | None:
     if write.verb == "edit" and own_dm(write.channel):
         logger.bind(hook=GATE, agent=evt.agent_id or "main", tool=evt.tool_name, allowed=True, detail="an edit in the user's own DM with the app").info("slack write checked")
         return evt.allow()
