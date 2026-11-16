@@ -1342,7 +1342,7 @@ func TestAMergedPRGetsALinkAndNoCardAndAPRTheBoardDoesNotHoldPostsNothing(t *tes
 func TestPRCardsOnlyInTheDMAndListedChannels(t *testing.T) {
 	cmd := fakeCardCommand(t, []string{"acme/app#41"}, mergeRowCard())
 	l, _ := cardingDaemon(t, cmd.argv, "acme/app#41")
-	unlisted := "drew no card for tap_prs " + tapPR41[0] + ": PR cards draw only in a DM or a [pr_links] card_channels channel, and " + testChannel + " is neither"
+	unlisted := "drew no card for tap_prs " + tapPR41[0] + ": PR cards draw only in a DM, an operator channel or a [pr_links] card_channels channel, and " + testChannel + " is none of them"
 	l.refused(opSend, l.hooked(opSend, map[string]any{"channel_id": testChannel, "text": "#41 is green", "tap_prs": tapPR41}), unlisted)
 	if sent := l.slack.sentTo(testChannel); len(sent) != 0 {
 		t.Fatalf("unlisted channel got %+v, want nothing posted", sent)

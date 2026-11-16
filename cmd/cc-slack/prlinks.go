@@ -289,7 +289,7 @@ func (a *app) bareHolders(ctx context.Context, id identity, scope string, number
 }
 
 func cardsAt(id identity, channelID string) bool {
-	return strings.HasPrefix(channelID, "D") || slices.Contains(id.Config.PRLinks.CardChannels, channelID)
+	return strings.HasPrefix(channelID, "D") || slices.Contains(id.Config.PRLinks.CardChannels, channelID) || slices.Contains(id.operatorChannelIDs(), channelID)
 }
 
 func tapCardsRefused(id identity, channelID string) string {
@@ -297,7 +297,7 @@ func tapCardsRefused(id identity, channelID string) string {
 	case len(id.Config.PRLinks.CardCommand) == 0:
 		return "this machine's cc-slack login has no [pr_links] card_command, so it draws no PR card: the config it last read sets none, or its program is not on the daemon's PATH; run `cc-slack reload --config <the config that sets it>`"
 	case !cardsAt(id, channelID):
-		return fmt.Sprintf("PR cards draw only in a DM or a [pr_links] card_channels channel, and %s is neither", channelID)
+		return fmt.Sprintf("PR cards draw only in a DM, an operator channel or a [pr_links] card_channels channel, and %s is none of them", channelID)
 	}
 	return ""
 }
