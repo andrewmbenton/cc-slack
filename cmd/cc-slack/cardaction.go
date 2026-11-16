@@ -1101,7 +1101,7 @@ func (p *poller) answeredTap(ctx context.Context, id identity, a cardActionPush,
 	switch {
 	case k.ID == "" || !done:
 		return false, nil
-	case ans.Settled:
+	case ans.Settled && slackTime(a.ActionTS).After(ans.At):
 		p.log.Printf("card action %s on %s: his tap overrules %q, which the drive settled", a.ActionID, a.MessageTS, ans.Label)
 	case ans.Undelivered != tapKey(a):
 		p.log.Printf("card action %s on %s: dropped: the ask was already answered", a.ActionID, a.MessageTS)

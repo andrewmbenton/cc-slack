@@ -780,9 +780,9 @@ func TestNewWordsOnAnAnsweredBoardCardRedrawItInPlaceAndAskNothing(t *testing.T)
 	}
 
 	redrawCard(t, l, c)
-	if redrawn := editsOf(l.slack.edited(), c.ts); len(redrawn) != edits+2 || !strings.Contains(redrawn[len(redrawn)-1], "Port, old tree to new: dev #41: Merge it now?") ||
+	if redrawn := editsOf(l.slack.edited(), c.ts); len(redrawn) != edits+1 || !strings.Contains(redrawn[len(redrawn)-1], "Port, old tree to new: dev #41: Merge it now?") ||
 		strings.Contains(redrawn[len(redrawn)-1], "Merge #41 now?") || !strings.Contains(redrawn[len(redrawn)-1], "✓ *Hold* · answered") {
-		t.Fatalf("card edits %v, want the next redraw to keep the new title over his answer", redrawn)
+		t.Fatalf("card edits %v, want the next redraw, drawing the same blocks, skipped and the new title kept over his answer", redrawn)
 	}
 }
 
