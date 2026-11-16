@@ -514,12 +514,9 @@ func (l *liveCards) copiesOf(channel, card string) []cardRef {
 	defer l.mu.Unlock()
 	var copies []cardRef
 	for _, t := range l.threads {
-		if t.Channel != channel {
-			continue
-		}
 		for _, c := range t.Copies {
-			if c.Card == card && !c.Link {
-				copies = append(copies, cardRef{channel, t.Thread, c.TS})
+			if !c.Link && (c.Card == card && t.Channel == channel || c.Card == channel+"/"+card) {
+				copies = append(copies, cardRef{t.Channel, t.Thread, c.TS})
 			}
 		}
 	}

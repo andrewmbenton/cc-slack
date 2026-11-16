@@ -774,6 +774,9 @@ func (a *app) postCardLink(ctx context.Context, db *sql.DB, id identity, channel
 		return err
 	}
 	a.cards.drew(channel, cmp.Or(under, res.TS), res.TS, post, []cardRef{card}, a.now())
+	if card.channel != channel {
+		a.cards.rememberCopy(channel, cmp.Or(under, res.TS), liveCardCopy{Card: card.channel + "/" + card.ts, TS: res.TS}, a.now())
+	}
 	return nil
 }
 
