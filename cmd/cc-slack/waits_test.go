@@ -155,14 +155,16 @@ func TestAnEditDrawsAnOpenCardItsThreadHasNotShown(t *testing.T) {
 	loggedIn(t, l)
 	card := postWaiting(t, l, mergeCard())
 	link := "<" + card.url() + "|the merge card>"
-	var first postResult
-	if err := json.Unmarshal(l.post(opSend, map[string]string{"channel_id": testChannel, "text": "first: " + link}).Body, &first); err != nil {
-		t.Fatal(err)
-	}
-	l.post(opEdit, map[string]string{"channel_id": testChannel, "ts": "1800000000.000100", "text": "now see " + link})
-	l.post(opEdit, map[string]string{"channel_id": testChannel, "ts": "1800000000.000100", "text": "now see " + link + ", still"})
-	l.post(opEdit, map[string]string{"channel_id": testChannel, "ts": "1800000000.000200", "text": "see https://example.slack.com/archives/C1/p1793818357021259"})
-	l.post(opEdit, map[string]string{"channel_id": testChannel, "ts": "1800000000.000300", "thread_ts": first.TS, "text": "edited: " + link})
+	l.do(opDMStatus, map[string]any{"text": "first: " + link})
+	first := lastPost(l)
+	l.do(opDMStatus, map[string]any{"text": "plain words"})
+	plain := lastPost(l)
+	l.do(opDMStatus, map[string]any{"thread_ts": first.ts, "text": "a reply"})
+	reply := lastPost(l)
+	l.post(opEdit, map[string]string{"channel_id": testDM, "ts": first.ts, "text": "now see " + link})
+	l.post(opEdit, map[string]string{"channel_id": testDM, "ts": first.ts, "text": "now see " + link + ", still"})
+	l.post(opEdit, map[string]string{"channel_id": testDM, "ts": plain.ts, "text": "see https://example.slack.com/archives/C1/p1793818357021259"})
+	l.post(opEdit, map[string]string{"channel_id": testDM, "ts": reply.ts, "thread_ts": first.ts, "text": "edited: " + link})
 	edits := l.slack.edited()
 	if len(edits) != 4 || edits[0].unfurlLinks != "true" || edits[1].unfurlLinks != "true" || edits[2].unfurlLinks == "true" || edits[3].unfurlLinks == "true" {
 		t.Fatalf("edits = %+v, want the card drawn by the message that links it each time it is edited, and plain in a thread that shows it and under a link to another message", edits)
@@ -181,8 +183,8 @@ func TestAnEditThatDropsACardLinkDeletesTheCardItsPostDrew(t *testing.T) {
 	}
 	sent := l.slack.sent()
 	drawn := sent[len(sent)-1]
-	if drawn.threadTS != first.TS || !strings.Contains(drawn.text, card.url()) {
-		t.Fatalf("last post %+v, want the merge card's link posted under %s", drawn, first.TS)
+	if drawn.threadTS != first.TS || drawn.text != cardCopyLead {
+		t.Fatalf("last post %+v, want the merge card copied under %s", drawn, first.TS)
 	}
 	l.post(opEdit, map[string]string{"channel_id": testChannel, "ts": first.TS, "text": "see " + link + " and " + other + ", still"})
 	if deleted := l.slack.deleted(); len(deleted) != 0 {
