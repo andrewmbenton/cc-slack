@@ -119,7 +119,7 @@ func claudeCwd(ctx context.Context, pid int) (string, error) {
 
 func (a *app) mintsTickets(ctx context.Context, pid int) bool {
 	if pid == 0 {
-		return true
+		return false
 	}
 	dir, err := a.claudeCwd(ctx, pid)
 	if err != nil {

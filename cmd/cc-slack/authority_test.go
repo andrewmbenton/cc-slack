@@ -553,3 +553,24 @@ func TestAWriteTheHookNeverTicketedSaysToRetryIt(t *testing.T) {
 	loggedIn(t, l)
 	l.refused(opReply, map[string]any{"channel_id": testChannel, "thread_ts": testThread, "text": "CI is green"}, "When it timed out before naming a ticket, retry the same call")
 }
+
+func TestAWriteFromNoClaudeSessionGoesWithoutATicketSinceNoHookCouldHaveRun(t *testing.T) {
+	l := startDaemon(t)
+	loggedIn(t, l)
+	l.deps.ClaudePID = func() int { return 0 }
+
+	var res postResult
+	if err := json.Unmarshal(l.do(opSend, map[string]any{"channel_id": testChannel, "text": "staging is ours"}).Body, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.TS == "" || l.slack.callCount("chat.postMessage") != 1 {
+		t.Fatalf("post %+v, chat.postMessage %d, want one post with no ticket", res, l.slack.callCount("chat.postMessage"))
+	}
+}
+
+func TestADetachedDriveVerbRunsUnderNoClaudeSession(t *testing.T) {
+	t.Setenv("LONG_RUNNING_DETACHED", "report-post")
+	if pid := claudePID(); pid != 0 {
+		t.Fatalf("claudePID() = %d under LONG_RUNNING_DETACHED, want 0", pid)
+	}
+}

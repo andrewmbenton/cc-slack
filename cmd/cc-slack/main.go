@@ -17,6 +17,13 @@ import (
 
 var channelPlugin = channelsetup.Plugin{Marketplace: "cc-slack", Name: "cc-slack"}
 
+func claudePID() int {
+	if os.Getenv("LONG_RUNNING_DETACHED") != "" {
+		return 0
+	}
+	return procs.ClaudePID()
+}
+
 func deps() cmd.Deps {
 	d := cmd.Deps{
 		Paths:                  appPaths(),
@@ -26,7 +33,7 @@ func deps() cmd.Deps {
 		EnsureCurrent:          nameReconnect(requireCurrentState(refuseForeignRollback(func(ctx context.Context) error { return launcher().EnsureCurrent(ctx, daemon.UpgradeTimeout) }))),
 		EnsureCurrentIfRunning: nameReconnect(requireCurrentState(refuseForeignRollback(func(ctx context.Context) error { return launcher().EnsureCurrentIfRunning(ctx) }))),
 		Stop:                   func(ctx context.Context) error { return launcher().Stop(ctx, daemon.UpgradeTimeout) },
-		ClaudePID:              procs.ClaudePID,
+		ClaudePID:              claudePID,
 		WindowAlive:            procs.LiveClaude,
 		TerminalEvent:          func(string) bool { return false },
 		ChannelEvent:           channelEvent,
