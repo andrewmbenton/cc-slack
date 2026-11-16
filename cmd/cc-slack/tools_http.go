@@ -71,7 +71,7 @@ func serveTools(ctx context.Context, s *daemon.Server) {
 		}
 	}
 	srv := &http.Server{
-		Handler:           toolsHandler(s),
+		Handler:           toolsHandler(s, logger),
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -84,7 +84,7 @@ func serveTools(ctx context.Context, s *daemon.Server) {
 	}
 }
 
-func toolsHandler(s *daemon.Server) http.Handler {
+func toolsHandler(s *daemon.Server, logger *log.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
