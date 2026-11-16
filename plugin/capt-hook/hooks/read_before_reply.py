@@ -91,14 +91,18 @@ def seen(newest: str, *, delivered: bool, after: int = 0) -> dict[str, str]:
     return {SEEN: json.dumps({"newest": newest, "delivered": delivered, "after": after})}
 
 
-def thread_seen(evt: ToolHookEvent, write: Write, since: str) -> dict[str, Any]:
+def thread_seen(evt: ToolHookEvent, write: Write, since: str) -> dict[str, Any] | None:
     if not (session := evt._raw.get("session_id")):
-        return {}
+        return None
     argv = [str(BIN), "thread-seen", "--session", session, "--channel", write.channel, "--thread", write.thread, "--owner", evt.agent_id or "", "--since", since]
     try:
-        return json.loads(capture(argv, timeout=SEEN_TIMEOUT) or "{}")
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return {}
+        out = capture(argv, timeout=SEEN_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        return json.loads(out) if out else None
+    except ValueError:
+        return None
 
 
 def newest_reached(evt: ToolHookEvent, write: Write, known: ThreadReads, found: dict[str, Any]) -> bool:
@@ -199,7 +203,8 @@ class ReadsThread:
         Input(tool=P + "slack_reply", tool_input=REPLY, commands=seen(PICKED, delivered=False)): Block(),
         Input(tool=P + "slack_reply", tool_input=REPLY, commands=seen(PICKED, delivered=False), state=[picks(PICKED)]): Allow(),
         Input(tool=P + "slack_reply", tool_input=REPLY, commands=seen(NEWER, delivered=False), state=[picks(PICKED)]): Block(),
-        Input(tool=P + "slack_reply", tool_input=REPLY, commands={SEEN: (1, "daemon down")}): Block(),
+        Input(tool=P + "slack_reply", tool_input=REPLY, commands={SEEN: (1, "daemon down")}): Allow(),
+        Input(tool=P + "slack_reply", tool_input=REPLY, commands={SEEN: "not json"}): Allow(),
     },
 )
 def replies_read_their_thread_first(evt: PreToolUseEvent) -> HookResult | None:
@@ -209,7 +214,7 @@ def replies_read_their_thread_first(evt: PreToolUseEvent) -> HookResult | None:
         if read.at is not None and now - read.at < READ_WINDOW:
             continue
         found = thread_seen(evt, write, read.through)
-        if not newest_reached(evt, write, known, found):
+        if found is not None and not newest_reached(evt, write, known, found):
             return evt.block(refusal(write, read, now, int(found.get("after") or 0)))
     return None
 

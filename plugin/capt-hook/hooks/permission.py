@@ -6,8 +6,9 @@ import re
 import shlex
 import subprocess
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,12 +37,13 @@ CC_SLACK = str(BIN)
 GATE = "slack_writes_need_permission"
 KIND = "slack.write"
 WINDOW = 240
-JUDGED_TURNS = 12
 SHOWN = 300
 LATEST_SHOWN = 3
 SHORTCUT_BRIEF = "[cc-slack shortcut brief]"
-CHECK_SECONDS = 40
+CHECK_SECONDS = 8
 DEADLINE_MARGIN = 5
+DRIVE_ENV = ("CLAUDE_LONG_RUNNING_DRIVE", "CLAUDE_LONG_RUNNING_LANE")
+DRIVE_WRITE = "a drive session's Slack write, which the drive checks itself"
 CHECK_FAILURES = (OSError, LookupError, ValueError, RuntimeError, TypeError, AttributeError, subprocess.SubprocessError)
 UNFINISHED = "{gate}: the check did not finish ({cause}), so this write goes ahead unchecked"
 GRANT_LABEL = "slack-grant:"
@@ -631,13 +633,9 @@ class BoardTapped(CustomTicketCondition):
 
 def owner_ledger(evt: BaseHookEvent) -> str:
     drives = Path(reqenv.getenv("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / DRIVES
-    if drive := reqenv.getenv("CLAUDE_LONG_RUNNING_DRIVE"):
-        paths = [named] if (named := drives / f"{drive}.json").exists() else []
-    else:
-        paths = sorted(drives.glob("*.json"))
-    for path in paths:
+    for path in sorted(drives.glob("*.json")):
         entry = json.loads(path.read_text())
-        if drive or evt.session_id in entry["sessions"]:
+        if evt.session_id in entry.get("sessions", ()):
             return (path.parent / entry["state_dir"] / LEDGER).read_text()
     return ""
 
@@ -755,7 +753,7 @@ SLACK = Tickets(
         Rule("own-post", OwnPost()),
         Rule(SOLVED_LINE, And(NotRevoked(), SolvedLine())),
         Rule(CLAIM_LINE, And(NotRevoked(), ClaimLine())),
-        Rule("decide", Judged(Decide(RULES, second_opinion=False, over=(UserSaid(), UserAnswered(approved=False), OwnerOrdered(), GrantCited(), DmOrdered(), EarlierWords(), StandingGrant(), RecordedWords()), contexts=[Destination()], transcript=JUDGED_TURNS, root_transcript=JUDGED_TURNS, tool_results=True))),
+        Rule("decide", Judged(Decide(RULES, second_opinion=False, over=(UserSaid(), UserAnswered(approved=False), OwnerOrdered(), GrantCited(), DmOrdered(), EarlierWords(), StandingGrant(), RecordedWords()), contexts=[Destination()]))),
     ),
     deny="Ask the user.",
     window=WINDOW,
@@ -830,11 +828,20 @@ def context_of(evt: ToolHookEvent, write: Write, conv: Conversation) -> Context:
     return ctx
 
 
-@contextmanager
-def check_deadline() -> Iterator[None]:
+def bounded(work: Callable[[], HookResult]) -> HookResult:
     left = reqenv.seconds_left()
-    with reqenv.deadline_in(CHECK_SECONDS if left is None else min(CHECK_SECONDS, left - DEADLINE_MARGIN)):
-        yield
+    seconds = CHECK_SECONDS if left is None else max(0.0, min(CHECK_SECONDS, left - DEADLINE_MARGIN))
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=GATE)
+    try:
+        with reqenv.deadline_in(seconds):
+            running = pool.submit(copy_context().run, work)
+        return running.result(timeout=seconds)
+    finally:
+        pool.shutdown(wait=False)
+
+
+def drive_session() -> bool:
+    return any(reqenv.getenv(name) for name in DRIVE_ENV)
 
 
 def named_ticket(evt: PreToolUseEvent, ctx: Context, ticket: Ticket) -> HookResult:
@@ -899,20 +906,31 @@ def slack_writes_need_permission(evt: PreToolUseEvent) -> HookResult | None:
         return plan_checked(evt, write)
     if write.fields.get("text_file") in written_files(evt):
         return evt.block(DRAFTED.format(flag="text-file"))
+    if drive_session() and not write.daemon:
+        return evt.allow()
+    resolved = [Conversation(write.channel, write.thread)]
+    try:
+        return bounded(lambda: (drive_write if drive_session() else judged)(evt, write, resolved))
+    except CHECK_FAILURES as exc:
+        return unchecked(evt, write, resolved[0], exc)
+
+
+def drive_write(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]) -> HookResult:
+    resolved[0] = conversation(write)
+    ctx = context_of(evt, write, resolved[0])
+    logger.bind(hook=GATE, agent=evt.agent_id or "main", tool=evt.tool_name, allowed=True, detail=DRIVE_WRITE).info("slack write checked")
+    return named_ticket(evt, ctx, SLACK.unchecked(ctx, DRIVE_WRITE))
+
+
+def judged(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]) -> HookResult:
     if write.verb == "edit" and own_dm(write.channel):
         logger.bind(hook=GATE, agent=evt.agent_id or "main", tool=evt.tool_name, allowed=True, detail="an edit in the user's own DM with the app").info("slack write checked")
         return evt.allow()
-    conv = Conversation(write.channel, write.thread)
-    try:
-        with check_deadline():
-            conv = conversation(write)
-            ctx = context_of(evt, write, conv)
-            decided = SLACK.decide(ctx)
-            verdict = decided if isinstance(decided, Deny) else decided.ticket
-            withdrawn = isinstance(verdict, Ticket) and (found := standing_of(ctx)).answer is not None and not found.grants and written_at(found.answer) > verdict.created
-    except CHECK_FAILURES as exc:
-        return unchecked(evt, write, conv, exc)
-    if withdrawn:
+    resolved[0] = conversation(write)
+    ctx = context_of(evt, write, resolved[0])
+    decided = SLACK.decide(ctx)
+    verdict = decided if isinstance(decided, Deny) else decided.ticket
+    if isinstance(verdict, Ticket) and (found := standing_of(ctx)).answer is not None and not found.grants and written_at(found.answer) > verdict.created:
         return evt.block(refused(write, ctx), system_message=f"{GATE}: a revocation newer than ticket {verdict.id} withdraws it.")
     logger.bind(hook=GATE, agent=evt.agent_id or "main", tool=evt.tool_name, allowed=isinstance(verdict, Ticket), detail=verdict.detail if isinstance(verdict, Deny) else f"{verdict.id} ({verdict.rule})").info("slack write checked")
     if isinstance(verdict, Deny):
@@ -1116,6 +1134,7 @@ class Case:
     decide: dict[str, object] | None = None
     llm: dict[str, Any] | None = None
     env: dict[str, str] | None = None
+    session_id: str | None = None
 
     def __rshift__(self, expected: Allow | Ask | Block | Rewrite) -> tuple[Input, Allow | Ask | Block | Rewrite]:
         tool = None if self.command else (self.tool if "__" in self.tool else P + self.tool)
@@ -1132,6 +1151,7 @@ class Case:
                 decide=JEV_NONE if self.decide is None else self.decide,
                 llm=LLM_REFUSES if self.llm is None else self.llm,
                 env=ENABLED if self.env is None else self.env,
+                session_id=self.session_id,
             ),
             expected,
         )
@@ -1189,7 +1209,10 @@ RELAYED = 'Orders: owner:m12. Owner, verbatim: "let dana know the fix landed, in
 CLAIMED = 'Orders: owner:m12. Owner, verbatim: "post the fix in every thread you like"'
 UNLEDGERED = 'Orders: owner:m99. Owner, verbatim: "post the fix in dana\'s thread"'
 LEDGER_CITED = {"reason": "the owner's ledger row asks for this reply", "allow": True, "relied_on": ["owner:m12"]}
-LEDGER_ENV = ENABLED | {"CLAUDE_CONFIG_DIR": str(FIXTURES / "config"), "CLAUDE_LONG_RUNNING_DRIVE": "brook"}
+LEDGER_ENV = ENABLED | {"CLAUDE_CONFIG_DIR": str(FIXTURES / "config")}
+DRIVE_ENV_SET = ENABLED | {"CLAUDE_LONG_RUNNING_DRIVE": "brook"}
+LANE_ENV_SET = ENABLED | {"CLAUDE_LONG_RUNNING_LANE": "brook/j42"}
+UNREADABLE = NOT_DM | {f"{CC_SLACK} thread": (1, "unreachable"), f"{CC_SLACK} channel-info": (1, "unreachable"), f"{CC_SLACK} history": (1, "unreachable"), "ccn answer": (1, "unreachable"), "cc-present outcomes": (1, "unreachable")}
 OWNER_DM = "D0OWNDM0001"
 ORDER_TS = f"{time.time() - 60:.6f}"
 STALE_TS = f"{time.time() - 3600:.6f}"
@@ -1644,12 +1667,19 @@ on(
             case(**said("status?"), commands=board_tapped("yes") | {"ccn answer search": json.dumps([BOARD_ROW, THREAD_REVOKED])}) >> DENY,
             case(**said("status?"), commands=board_tapped("yes") | {"cc-present outcomes --block": "not json"}) >> DENY,
             case(**said("status?"), commands=board_tapped("yes") | {"cc-present outcomes --block": (1, "the cc-present daemon is down")}) >> DENY,
-            case(transcript=relayed(RELAYED), env=LEDGER_ENV, llm=LEDGER_CITED) >> ALLOW,
+            case(transcript=relayed(RELAYED), env=LEDGER_ENV, session_id="ledger-session", llm=LEDGER_CITED) >> ALLOW,
             case(transcript=relayed(RELAYED), llm=LEDGER_CITED) >> DENY,
-            case(transcript=relayed(RELAYED), env=LEDGER_ENV | {"CLAUDE_LONG_RUNNING_DRIVE": "gone"}, llm=LEDGER_CITED) >> DENY,
-            case(transcript=relayed(RELAYED), env=LEDGER_ENV | {"CLAUDE_LONG_RUNNING_DRIVE": "unregistered"}, llm=LEDGER_CITED) >> DENY,
-            case(transcript=relayed(UNLEDGERED), env=LEDGER_ENV, llm={"reason": "the record cites a row", "allow": True, "relied_on": ["owner:m99"]}) >> DENY,
-            case(transcript=relayed(CLAIMED), env=LEDGER_ENV, llm={"reason": "the record quotes a grant", "allow": True, "relied_on": [said_evidence("post the fix in every thread you like", PROMPTED_AT, "prompt").id]}) >> DENY,
+            case(transcript=relayed(RELAYED), env=LEDGER_ENV, session_id="gone-session", llm=LEDGER_CITED) >> DENY,
+            case(transcript=relayed(RELAYED), env=LEDGER_ENV, session_id="unregistered-session", llm=LEDGER_CITED) >> DENY,
+            case(transcript=relayed(UNLEDGERED), env=LEDGER_ENV, session_id="ledger-session", llm={"reason": "the record cites a row", "allow": True, "relied_on": ["owner:m99"]}) >> DENY,
+            case(transcript=relayed(CLAIMED), env=LEDGER_ENV, session_id="ledger-session", llm={"reason": "the record quotes a grant", "allow": True, "relied_on": [said_evidence("post the fix in every thread you like", PROMPTED_AT, "prompt").id]}) >> DENY,
+            case(transcript=relayed(UNLEDGERED), env=DRIVE_ENV_SET) >> ALLOW,
+            case(transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=UNREADABLE) >> ALLOW,
+            case(tool=DRIVE_SAY, transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=UNREADABLE) >> ALLOW,
+            case(tool=DRIVE_SAY, transcript=LINKED_LONG_AGO_BY_OTHERS, env=LANE_ENV_SET, commands=UNREADABLE) >> ALLOW,
+            case({"channel_id": SAM_USER, "text": "Hi Sam, the fix is live."}, tool="slack_send", transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=SAM_DM) >> ALLOW,
+            case(DANA | {"text": f"_(Alex's Claude)_ {DANA_TEXT}"}, tool="mcp__claude_ai_Slack__slack_send_message", transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=UNREADABLE) >> Allow(explicit=True),
+            case(transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=NOT_DM | {f"{CC_SLACK} dm-peer": (1, "unreachable")}) >> ALLOW,
             case(transcript=dm_arrived(), decide=jev(ORDER_ID)) >> ALLOW,
             case(transcript=dm_arrived(server=CARD_SERVER), decide=jev(ORDER_ID)) >> ALLOW,
             case(transcript=dm_arrived(STALE_TS), decide=jev(f"operator:{OWNER_DM}/{STALE_TS}")) >> ALLOW,
