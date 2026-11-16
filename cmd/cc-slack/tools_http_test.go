@@ -84,7 +84,7 @@ func TestAToolCallTakesTheTicketItsHookKeptByToolUseIDOnce(t *testing.T) {
 		t.Fatalf("ticket file still there: %v", err)
 	}
 	again, err := ticketed([]byte(call), logger)
-	if err != nil || !strings.Contains(string(again), `"ticket_unhooked":true`) {
+	if err != nil || !strings.Contains(string(again), `"ticket_unhooked":"slack_send toolu_1"`) {
 		t.Fatalf("second call = %s, %v; want it marked unhooked with no file left", again, err)
 	}
 }

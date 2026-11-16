@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,7 @@ type ticketSpend struct {
 	Agent       string `json:"ticket_agent"`
 	Call        string `json:"ticket_call"`
 	Fingerprint string `json:"ticket_fingerprint"`
-	Unhooked    bool   `json:"ticket_unhooked"`
+	Unhooked    string `json:"ticket_unhooked"`
 }
 
 type write struct {
@@ -254,7 +255,11 @@ func keptTickets(session string) []keptTicket {
 
 func (a *app) authorize(hc daemon.HandlerCtx, api slackAPI, id identity, s ticketSpend, w write) (hookTicket, *receipt, error) {
 	ctx, db := hc.Ctx, hc.DB
-	if w.editsInOperatorChannel(id) || s.TicketID == "" && (s.Unhooked || !a.mintsTickets(ctx, hc.Env.ClaudePID)) {
+	if s.TicketID == "" && s.Unhooked != "" {
+		log.Printf("%s goes with no ticket: the permission hook kept none for tool call %s", w.target(), s.Unhooked)
+		return hookTicket{}, nil, nil
+	}
+	if w.editsInOperatorChannel(id) || s.TicketID == "" && !a.mintsTickets(ctx, hc.Env.ClaudePID) {
 		return hookTicket{}, nil, nil
 	}
 	t, err := a.spendTicket(ctx, api, id, hc.Env.Session, s, w)

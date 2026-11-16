@@ -216,7 +216,9 @@ func ticketed(body []byte, logger *log.Logger) ([]byte, error) {
 		delete(fields, "session")
 		maps.Copy(params.Arguments, fields)
 	case !typed:
-		params.Arguments["ticket_unhooked"] = json.RawMessage("true")
+		if params.Arguments["ticket_unhooked"], err = json.Marshal(params.Name + " " + use); err != nil {
+			return nil, err
+		}
 	}
 	var whole map[string]json.RawMessage
 	if err := json.Unmarshal(req["params"], &whole); err != nil {
