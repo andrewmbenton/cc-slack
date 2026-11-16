@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shlex
 import sqlite3
 import subprocess
 import time
 from collections.abc import Callable
-from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, replace
@@ -34,6 +32,7 @@ from captain_hook.types import And, Or
 from captain_hook.util import reqenv
 
 from .common import BIN, check_post
+from .drives import drive_session
 from .writes import DRIVE_SAY, USER_TOOLS, Write, capture, cli_calls, pending, permalink, permissions
 
 CC_SLACK = str(BIN)
@@ -45,9 +44,7 @@ LATEST_SHOWN = 3
 SHORTCUT_BRIEF = "[cc-slack shortcut brief]"
 CHECK_SECONDS = 8
 DEADLINE_MARGIN = 5
-DRIVE_ENV = ("CLAUDE_LONG_RUNNING_DRIVE", "CLAUDE_LONG_RUNNING_LANE")
 DRIVE_WRITE = "a drive session's Slack write, which the drive checks itself"
-DRIVE_BINDINGS = "SELECT collection, key, body FROM rows WHERE collection = '' AND key IN ('driver', 'roles', 'subcoordinators') OR collection = 'handlers'"
 CHECK_FAILURES = (OSError, LookupError, ValueError, RuntimeError, TypeError, AttributeError, subprocess.SubprocessError, sqlite3.Error)
 UNFINISHED = "{gate}: the check did not finish ({cause}), so this write goes ahead unchecked"
 GRANT_LABEL = "slack-grant:"
@@ -329,6 +326,14 @@ class Refusal(str):
     pass
 
 
+class UnreadEvidence(RuntimeError):
+    pass
+
+
+def unread(ctx: Context, what: str, exc: Exception) -> None:
+    ctx.facts[UnreadEvidence] = UnreadEvidence(f"{what} did not read: {type(exc).__name__}: {str(exc).partition(chr(10))[0]}")
+
+
 @dataclass(frozen=True, slots=True)
 class Judged(CustomTicketCondition):
     judge: Decide
@@ -602,7 +607,9 @@ def card_id(write: Write, place: dict[str, str]) -> str:
 
 def tool_out(evt: BaseHookEvent, argv: list[str]) -> str | None:
     done = subprocess.run(argv, capture_output=True, text=True, timeout=5, env=reqenv.env_map(), cwd=evt.cwd, check=False)
-    return done.stdout if done.returncode == 0 and done.stdout.strip() else None
+    if done.returncode:
+        raise RuntimeError(f"`{argv[0]} {argv[1]}` exited {done.returncode}: {done.stderr.strip()[:SHOWN]}")
+    return done.stdout if done.stdout.strip() else None
 
 
 def board_tap(ctx: Context) -> Evidence | None:
@@ -613,7 +620,7 @@ def board_tap(ctx: Context) -> Evidence | None:
     if session is None or (out := tool_out(evt, ["cc-present", "outcomes", "--block", card, "--session", session])) is None:
         return None
     shown = json.loads(out)
-    drawn = next((block for block in shown["doc"]["blocks"] if block["id"] == card), None)
+    drawn = next((block for block in shown.get("doc", {}).get("blocks", ()) if block["id"] == card), None)
     if drawn is None:
         return None
     text = "\n".join([drawn.get("title", ""), *(child["md"] for child in drawn.get("children", ()) if child.get("type") == "markdown")])
@@ -630,7 +637,8 @@ class BoardTapped(CustomTicketCondition):
     def evidence(self, ctx: Context) -> list[Evidence] | None:
         try:
             found = board_tap(ctx)
-        except CHECK_FAILURES:
+        except CHECK_FAILURES as exc:
+            unread(ctx, "the board answer", exc)
             return None
         return None if found is None else [found]
 
@@ -656,7 +664,8 @@ class OwnerOrdered(CustomTicketCondition):
             return None
         try:
             ledger = owner_ledger(live(ctx))
-        except CHECK_FAILURES:
+        except CHECK_FAILURES as exc:
+            unread(ctx, "the owner ledger", exc)
             return None
         found = [
             Evidence(id=f"owner:{row}", source="owner-ledger", quote=words.replace("<br>", "\n").replace(r"\|", "|"), detail="the owner's own message, as the communicator's owner ledger holds it")
@@ -716,7 +725,8 @@ def linked_orders(ctx: Context, delivered: set[str]) -> list[Evidence]:
     for channel, thread in {(channel, thread) for channel, thread, _ in links if channel in owned}:
         try:
             messages = read_thread(Conversation(channel, thread)).messages
-        except CHECK_FAILURES:
+        except CHECK_FAILURES as exc:
+            unread(ctx, "his DM thread", exc)
             continue
         found += [
             order(channel, message.ts, message.text, "the user's own message in their DM with the app, read back from Slack")
@@ -844,43 +854,6 @@ def bounded(work: Callable[[], HookResult]) -> HookResult:
         pool.shutdown(wait=False)
 
 
-def drive_root() -> Path:
-    if explicit := os.environ.get("LONG_RUNNING_STATE"):
-        return Path(explicit)
-    if xdg := os.environ.get("XDG_STATE_HOME"):
-        return Path(xdg) / "long-running"
-    return Path.home() / ".local" / "state" / "long-running"
-
-
-def saved_drive(folder: Path) -> dict[str, Any]:
-    if (db := folder / "drive.db").is_file():
-        with closing(sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=1)) as conn:
-            rows = conn.execute(DRIVE_BINDINGS).fetchall()
-        return {key: json.loads(body) for collection, key, body in rows if not collection} | {"handlers": {key: json.loads(body) for collection, key, body in rows if collection}}
-    return json.loads((folder / "drive.json").read_text())
-
-
-def drive_sessions(saved: dict[str, Any]) -> set[str]:
-    roles = {"coordinator": saved["driver"]} if "driver" in saved else saved.get("roles", {})
-    return {entry.get("session") for entry in (*roles.values(), *saved.get("subcoordinators", {}).values(), *saved.get("handlers", {}).values())}
-
-
-def bound_to_drive(session: str) -> bool:
-    if not session or not (root := drive_root()).is_dir():
-        return False
-    for folder in root.iterdir():
-        try:
-            if session in drive_sessions(saved_drive(folder)):
-                return True
-        except CHECK_FAILURES:
-            continue
-    return False
-
-
-def drive_session(evt: BaseHookEvent) -> bool:
-    return any(reqenv.getenv(name) for name in DRIVE_ENV) or bound_to_drive(evt.session_id or "")
-
-
 def named_ticket(evt: PreToolUseEvent, ctx: Context, ticket: Ticket) -> HookResult:
     fields = {"ticket_id": ticket.id, "ticket_tree": ticket.tree, "ticket_agent": ctx.agent, "ticket_call": ctx.call, "ticket_fingerprint": ctx.action.fingerprint}
     if evt.tool_name != "Bash":
@@ -969,6 +942,8 @@ def judged(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]) -> 
     verdict = decided if isinstance(decided, Deny) else decided.ticket
     if isinstance(verdict, Ticket) and (found := standing_of(ctx)).answer is not None and not found.grants and written_at(found.answer) > verdict.created:
         return evt.block(refused(write, ctx), system_message=f"{GATE}: a revocation newer than ticket {verdict.id} withdraws it.")
+    if isinstance(verdict, Deny) and (failed := ctx.facts.get(UnreadEvidence)) is not None:
+        raise failed
     logger.bind(hook=GATE, agent=evt.agent_id or "main", tool=evt.tool_name, allowed=isinstance(verdict, Ticket), detail=verdict.detail if isinstance(verdict, Deny) else f"{verdict.id} ({verdict.rule})").info("slack write checked")
     if isinstance(verdict, Deny):
         return evt.block(refused(write, ctx), system_message=f"{GATE}: {verdict.detail}" if verdict.detail else None)
@@ -1702,11 +1677,11 @@ on(
             case(DANA | {"text": "a later reply"}, **said("status?"), commands=ruled(BOARD_GRANT) | thread_read(DANA_OPENED), decide=jev(ruling_evidence(BOARD_GRANT).id)) >> ALLOW,
             case(DANA | {"text": "a later reply"}, **said("status?"), commands=ruled(BOARD_GRANT | {"title": f"Post this in {PETS}?"}) | thread_read(DANA_OPENED)) >> DENY,
             case(**said("status?"), commands=board_tapped("yes") | {"ccn answer search": json.dumps([BOARD_ROW, THREAD_REVOKED])}) >> DENY,
-            case(**said("status?"), commands=board_tapped("yes") | {"cc-present outcomes --block": "not json"}) >> DENY,
-            case(**said("status?"), commands=board_tapped("yes") | {"cc-present outcomes --block": (1, "the cc-present daemon is down")}) >> DENY,
+            case(**said("status?"), commands=board_tapped("yes") | {"cc-present outcomes --block": "not json"}) >> ALLOW,
+            case(**said("status?"), commands=board_tapped("yes") | {"cc-present outcomes --block": (1, "the cc-present daemon is down")}) >> ALLOW,
             case(transcript=relayed(RELAYED), env=LEDGER_ENV, session_id="ledger-session", llm=LEDGER_CITED) >> ALLOW,
             case(transcript=relayed(RELAYED), llm=LEDGER_CITED) >> DENY,
-            case(transcript=relayed(RELAYED), env=LEDGER_ENV, session_id="gone-session", llm=LEDGER_CITED) >> DENY,
+            case(transcript=relayed(RELAYED), env=LEDGER_ENV, session_id="gone-session", llm=LEDGER_CITED) >> ALLOW,
             case(transcript=relayed(RELAYED), env=LEDGER_ENV, session_id="unregistered-session", llm=LEDGER_CITED) >> DENY,
             case(transcript=relayed(UNLEDGERED), env=LEDGER_ENV, session_id="ledger-session", llm={"reason": "the record cites a row", "allow": True, "relied_on": ["owner:m99"]}) >> DENY,
             case(transcript=relayed(CLAIMED), env=LEDGER_ENV, session_id="ledger-session", llm={"reason": "the record quotes a grant", "allow": True, "relied_on": [said_evidence("post the fix in every thread you like", PROMPTED_AT, "prompt").id]}) >> DENY,

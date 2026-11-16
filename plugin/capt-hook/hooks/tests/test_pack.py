@@ -97,7 +97,7 @@ class PackTest(unittest.TestCase):
     def test_discover_pack_loads_every_module_and_hook(self) -> None:
         self.assertEqual(app._state.load_errors, [])
         self.assertEqual(len(app._state.hooks), 13)
-        for module in ("agent_plane", "common", "slack_comms_need_proof", "session", "permission", "plain_words", "read_before_reply", "writes"):
+        for module in ("agent_plane", "common", "drives", "slack_comms_need_proof", "session", "permission", "plain_words", "read_before_reply", "writes"):
             self.assertIn(f"{self.package}.{module}", sys.modules)
 
         expected = {
@@ -356,7 +356,7 @@ class PackTest(unittest.TestCase):
         self.assertFalse(self.refused(cli))
 
     def test_a_session_a_drive_binds_is_a_drive_session(self) -> None:
-        permission = sys.modules[f"{self.package}.permission"]
+        drives = sys.modules[f"{self.package}.drives"]
         state = Path(self.tmp.name) / "long-running"
         (state / "legacy").mkdir(parents=True)
         (state / "legacy" / "drive.json").write_text(json.dumps({"driver": {"session": "s-legacy"}}))
@@ -368,6 +368,7 @@ class PackTest(unittest.TestCase):
                 [
                     ("", "roles", json.dumps({"communicator": {"session": "s-root"}})),
                     ("", "subcoordinators", json.dumps({"Platform": {"session": "s-sub"}})),
+                    ("", "slack", json.dumps({"channels": {"": {"id": "C0DRIVE0001"}, "Platform": {"id": "C0DRIVE0002"}}})),
                     ("handlers", "h1", json.dumps({"session": "s-handler"})),
                     ("handlers", "h2", json.dumps({"session": None})),
                 ],
@@ -378,9 +379,18 @@ class PackTest(unittest.TestCase):
         (state / "stray.txt").write_text("")
         with mock.patch.dict(os.environ, {"LONG_RUNNING_STATE": str(state)}):
             self.assertEqual(
-                [permission.bound_to_drive(session) for session in ("s-legacy", "s-root", "s-sub", "s-handler", "s-other", "")],
+                [drives.bound_to_drive(session) for session in ("s-legacy", "s-root", "s-sub", "s-handler", "s-other", "")],
                 [True, True, True, True, False, False],
             )
+        reply = THREAD | {"text": "On it."}
+        home = {"CLAUDE_LONG_RUNNING_DRIVE": "current", "LONG_RUNNING_STATE": str(state)}
+        with mock.patch.dict(os.environ, home), mock.patch.object(drives, "his_dm", return_value={"D0HISDM0001"}):
+            self.assertEqual(
+                [drives.drive_home(mock_tool_event(TOOLS + tool, tool_input=write)) for tool, write in (("slack_reply", reply | {"channel_id": "C0DRIVE0002"}), ("slack_edit", reply | {"channel_id": "D0HISDM0001", "ts": "1790210144.444180"}), ("slack_reply", reply), ("slack_thread", reply | {"channel_id": "C0DRIVE0001"}))],
+                [True, True, False, False],
+            )
+        with mock.patch.dict(os.environ, {"LONG_RUNNING_STATE": str(state)}), mock.patch.object(drives, "his_dm", return_value={"D0HISDM0001"}):
+            self.assertFalse(drives.drive_home(mock_tool_event(TOOLS + "slack_reply", tool_input=reply | {"channel_id": "C0DRIVE0002"})))
 
 
 if __name__ == "__main__":

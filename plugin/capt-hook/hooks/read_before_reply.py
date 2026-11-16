@@ -13,6 +13,7 @@ from captain_hook import Allow, Block, Event, HookResult, Input, PostToolUseEven
 from captain_hook.events import ToolHookEvent
 
 from .common import BIN
+from .drives import DriveHome
 from .plain_words import CLI, P, THREAD, THREAD_LINK
 from .writes import Write, capture, pending, read_threads
 
@@ -172,6 +173,7 @@ class ReadsThread:
 @on(  # capt-hook: no-escape the refusal names the one read call that clears it
     Event.PreToolUse,
     only_if=[RepliesInThread()],
+    skip_if=[DriveHome()],
     tests={
         Input(tool=P + "slack_reply", tool_input=REPLY, commands=UNSEEN): Block(pattern=r"has not read the thread.*`slack_thread` with `channel_id` C0APPTHREAD and `thread_ts` 1790210144\.444179, then retry"),
         Input(tool=P + "slack_send", tool_input=REPLY, commands=UNSEEN): Block(),

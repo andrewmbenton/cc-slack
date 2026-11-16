@@ -6,6 +6,7 @@ from fnmatch import fnmatchcase
 
 from captain_hook import CONFIRMED, UNCONFIRMED, Allow, Block, Confirm, Event, HookResult, Input, PreToolUseEvent, on
 
+from .drives import DriveHome
 from .permission import CC_SLACK, Conversation, Message, read_thread
 from .plain_words import DISABLED, ENABLED, P, THREAD, WritesSlack, block_text
 from .writes import Write, capture, pending, permissions
@@ -100,6 +101,7 @@ def send(text: str, channel: str = THREAD["channel_id"]) -> Input:
 @on(
     Event.PreToolUse,
     only_if=[WritesSlack()],
+    skip_if=[DriveHome()],
     tests={
         reply("Can you send us your logs from this morning?", decide=CONFIRMED): Block(pattern=r"^Incident comms never asks a person for logs"),
         reply("Which version of the app are you on?", decide=CONFIRMED): Block(),
@@ -122,6 +124,7 @@ def comms_never_asks_for_evidence(evt: PreToolUseEvent) -> HookResult | None:
 @on(
     Event.PreToolUse,
     only_if=[WritesSlack()],
+    skip_if=[DriveHome()],
     tests={
         reply("Dana, this is fixed now.", decide=CONFIRMED): Block(pattern=r"^Telling someone their problem is fixed"),
         reply("Your run is fixed now.", decide=CONFIRMED): Block(),
