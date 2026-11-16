@@ -304,6 +304,7 @@ func (p *poller) markReconciled(ctx context.Context, db *sql.DB, api slackAPI, d
 
 func (p *poller) run(ctx context.Context) {
 	ctx = withSource(ctx, "poller")
+	defer slackCalls.flush(time.Now)
 	if err := p.loadCompactions(ctx); err != nil {
 		p.log.Printf("load the sessions compacting when the daemon stopped: %v", err)
 	}

@@ -54,13 +54,25 @@ func (t *callTally) add(method, source string, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if now.Sub(t.since) >= tallyEvery {
-		log.Printf("slack calls in the last %s: %s", now.Sub(t.since).Round(time.Second), t.line())
-		t.since, t.counts = now, map[string]map[string]int{}
+		t.logged(now)
 	}
 	if t.counts[method] == nil {
 		t.counts[method] = map[string]int{}
 	}
 	t.counts[method][source]++
+}
+
+func (t *callTally) flush(now func() time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.counts) > 0 {
+		t.logged(now())
+	}
+}
+
+func (t *callTally) logged(now time.Time) {
+	log.Printf("slack calls in the last %s: %s", now.Sub(t.since).Round(time.Second), t.line())
+	t.since, t.counts = now, map[string]map[string]int{}
 }
 
 func (t *callTally) line() string {
