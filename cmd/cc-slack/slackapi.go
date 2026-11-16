@@ -33,7 +33,6 @@ type slackAPI interface {
 	RemoveReactionContext(ctx context.Context, name string, item slack.ItemRef) error
 	AddPinContext(ctx context.Context, channel string, item slack.ItemRef) error
 	UpdateMessageContext(ctx context.Context, channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error)
-	PostEphemeralContext(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error)
 	SetAssistantThreadsStatusContext(ctx context.Context, params slack.AssistantThreadsSetStatusParameters) error
 	StartStreamContext(ctx context.Context, channelID string, options ...slack.MsgOption) (string, string, error)
 	AppendStreamContext(ctx context.Context, channelID, timestamp string, options ...slack.MsgOption) (string, string, error)

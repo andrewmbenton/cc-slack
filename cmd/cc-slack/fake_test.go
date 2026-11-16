@@ -91,7 +91,6 @@ type fakeSlack struct {
 	topics    map[string]string
 	cards     []slack.WorkObjectEntity
 	asked     []string
-	ephemeral []string
 	clock     int64
 	canvases  map[string]fakeCanvas
 	boards    map[string]string
@@ -1334,24 +1333,4 @@ func (f *fakeSlack) setDM(channelID string, users ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.dms[channelID] = users
-}
-
-func (f *fakeSlack) ephemerals() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.ephemeral)
-}
-
-func (f *fakeSlack) PostEphemeralContext(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.call("chat.postEphemeral"); err != nil {
-		return "", err
-	}
-	values, err := sentForm(channelID, options...)
-	if err != nil {
-		return "", err
-	}
-	f.ephemeral = append(f.ephemeral, values.Get("text"))
-	return "1.000001", nil
 }

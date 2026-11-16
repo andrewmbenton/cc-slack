@@ -168,7 +168,14 @@ func socketFrames(h *shortcutHandler, p *poller, r *replayCursor) func(ctx conte
 			if err := json.Unmarshal(push.EventPayload, &action); err != nil {
 				return fmt.Errorf("decode card action %q: %w", clip(string(frame)), err)
 			}
-			p.taps.run(context.WithoutCancel(ctx), action.Channel+"/"+action.MessageTS, func(ctx context.Context) {
+			card := action.Channel + "/" + action.MessageTS
+			if !p.startApplying(card) {
+				p.log.Printf("card action %s on %s: dropped: a tap on the card is still applying", action.ActionID, action.MessageTS)
+				r.nudged(action.Seq)
+				return nil
+			}
+			p.taps.run(context.WithoutCancel(ctx), card, func(ctx context.Context) {
+				defer p.doneApplying(card)
 				if err := p.cardAction(ctx, id, action); err != nil {
 					p.log.Printf("card action %s on %s: %v", action.ActionID, action.MessageTS, err)
 					return

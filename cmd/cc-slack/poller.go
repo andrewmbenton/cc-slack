@@ -63,8 +63,8 @@ type poller struct {
 	shortcuts  *shortcutHandler
 	cards      *liveCards
 	taps       tapQueue
-	feedbackMu sync.Mutex
-	feedback   map[string]*time.Timer
+	applyingMu sync.Mutex
+	applying   map[string]bool
 	wakeCh     chan struct{}
 	reconcile  atomic.Bool
 	paused     map[string]time.Time

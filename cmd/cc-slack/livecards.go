@@ -3,12 +3,16 @@ package main
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"maps"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,6 +57,8 @@ type liveMessage struct {
 	Unfolded bool `json:"unfolded,omitempty"`
 	Edited   bool `json:"edited,omitempty"`
 	Ended    bool `json:"ended,omitempty"`
+
+	DrawnHash string `json:"drawn_hash,omitempty"`
 }
 
 type liveThread struct {
@@ -312,6 +318,7 @@ type liveCards struct {
 	undrawn      map[string]map[string]bool
 	sweepFrom    string
 	sweepWrote   []time.Time
+	drawStats    drawStats
 	tapping      atomic.Int32
 }
 
@@ -1576,6 +1583,10 @@ func (l *liveCards) flush(ctx context.Context, api slackAPI, t *liveThread, writ
 }
 
 func (l *liveCards) update(ctx context.Context, api slackAPI, channel string, w cardWrite) error {
+	drawn := drawnHash(w.text, w.blocks)
+	if w.m != nil && l.unchanged(w.m, drawn) {
+		return nil
+	}
 	if ctx.Value(sweepKey{}) != nil {
 		if wait := l.sweepWait(); wait > 0 {
 			return &slack.RateLimitedError{RetryAfter: wait}
@@ -1583,7 +1594,13 @@ func (l *liveCards) update(ctx context.Context, api slackAPI, channel string, w 
 	}
 	ctx, cancel := context.WithTimeout(ctx, liveUpdateTimeout)
 	defer cancel()
-	return updateMessage(ctx, api, channel, w.ts, w.text, w.blocks, w.entities...)
+	if err := updateMessage(ctx, api, channel, w.ts, w.text, w.blocks, w.entities...); err != nil {
+		return err
+	}
+	if w.m != nil {
+		l.markDrawn(w.m, drawn)
+	}
+	return nil
 }
 
 func (t *liveThread) drop(m *liveMessage) {
@@ -2270,4 +2287,52 @@ func (l *liveCards) sweepWait() time.Duration {
 	}
 	l.sweepWrote = append(l.sweepWrote, now)
 	return 0
+}
+
+var signedQuery = regexp.MustCompile(`\?[^"\s]*X-Amz-Signature[^"\s]*`)
+
+func drawnHash(text string, blocks []slack.Block) string {
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		panic(fmt.Sprintf("encode card blocks: %v", err))
+	}
+	sum := sha256.Sum256(append([]byte(text+"\x00"), signedQuery.ReplaceAll(raw, nil)...))
+	return hex.EncodeToString(sum[:])
+}
+
+func (l *liveCards) unchanged(m *liveMessage, drawn string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	same := m.DrawnHash == drawn
+	if same {
+		l.drawStats.skipped++
+	}
+	return same
+}
+
+func (l *liveCards) markDrawn(m *liveMessage, drawn string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	m.DrawnHash = drawn
+	l.drawStats.written++
+	if now := l.now(); l.drawStats.since.IsZero() {
+		l.drawStats.since = now
+	} else if now.Sub(l.drawStats.since) >= time.Hour {
+		l.log.Printf("live cards: %d card edits, %d unchanged redraws skipped since %s", l.drawStats.written, l.drawStats.skipped, l.drawStats.since.In(pacific).Format(time.Kitchen))
+		l.drawStats = drawStats{since: now}
+	}
+}
+
+func (l *liveCards) forgetDrawn(channel, ts string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, m := l.liveMessage(channel, ts); m != nil {
+		m.DrawnHash = ""
+	}
+}
+
+type drawStats struct {
+	since   time.Time
+	written int
+	skipped int
 }
