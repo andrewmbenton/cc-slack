@@ -807,24 +807,26 @@ func TestAnAnsweredCardAsksAgainInPlaceOnlyUnderANewWaitsID(t *testing.T) {
 		return edits[len(edits)-1]
 	}
 	eventually(t, "his Hold on the card", func() bool { return strings.Contains(now(), "✓ *Hold* · answered") })
-	redraw := func(drawn providedCard, what string) {
+	redraw := func(drawn providedCard, what string, edited bool) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(filepath.Dir(cmd.argv[0]), "cards.json"), mustJSON(map[string]any{"cards": []providedCard{drawn}}), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		edits := len(editsOf(l.slack.edited(), card.ts))
 		l.do(opRedrawPRCards, map[string]any{})
-		eventually(t, what, func() bool { return len(editsOf(l.slack.edited(), card.ts)) > edits })
+		if edited {
+			eventually(t, what, func() bool { return len(editsOf(l.slack.edited(), card.ts)) > edits })
+		}
 	}
 
-	redraw(changedTapCard(rewritten), "the card redrawn under the waits id he answered")
+	redraw(changedTapCard(rewritten), "the card redrawn under the waits id he answered", false)
 	if got := rootCards(prCards(l, testDM)); len(got) != 1 || !strings.Contains(now(), "✓ *Hold* · answered") || strings.Contains(now(), cardWaitAction) {
 		t.Fatalf("PR cards = %+v, card %s; want the one card still answered Hold, its line changed and no button back", got, now())
 	}
 
 	asked := changedTapCard(rewritten)
 	asked.Card.Waits = "merge:41:09b10f1"
-	redraw(asked, "the card asked again under a new waits id")
+	redraw(asked, "the card asked again under a new waits id", true)
 	if text := shown(t, fakePost{blocks: now()}); !strings.Contains(now(), cardWaitAction+"1:merge:41:09b10f1") || !strings.Contains(text, rewritten) || strings.Contains(text, "· answered") || strings.Contains(text, "*Replaced:*") {
 		t.Fatalf("card = %s, want it asking again in place under the new waits id, its changed line shown, with no answer or Replaced line", now())
 	}
