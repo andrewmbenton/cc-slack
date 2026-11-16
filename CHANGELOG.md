@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The daemon logs, every 10 minutes, how many calls it made to each Slack method and which op, the poller, the card sweep or other background work made them, as `slack calls in the last 10m0s: conversations.replies 312 (poller 180, thread 70, …)`, so a run of 429s names its caller.
 - Each operator channel has its own holder: the newest session watching it, other than the one holding your DM, hears your words there and in its threads, and the DM's holder no longer does. `dm-owed` names each reply's `channel_id` and the `holder_session` that owes it, `dm-status --as-holder --channel` posts as that channel's holder, a tap on a card there whose poster ended goes to it, and the daemon's compaction ack for a message there posts in that channel, where before it posted in your DM.
 - `cc-slack operator-channel <new-name> --rename <id>` renames one of your operator channels as you and records its new name.
 - `--purpose <text>` on `operator-channel --rename` sets that channel's description as you, and a rename to the channel's own name renames nothing, so a drive can set each channel's description on every pass. The `slack_channel_rename` tool does the same from a session.

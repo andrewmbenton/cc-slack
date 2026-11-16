@@ -303,6 +303,7 @@ func (p *poller) markReconciled(ctx context.Context, db *sql.DB, api slackAPI, d
 }
 
 func (p *poller) run(ctx context.Context) {
+	ctx = withSource(ctx, "poller")
 	for {
 		next, err := p.tick(ctx)
 		if err != nil {

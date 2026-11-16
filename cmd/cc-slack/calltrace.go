@@ -1,11 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -13,9 +16,74 @@ import (
 	"github.com/yasyf/cc-interact/daemon"
 )
 
-const slowOp = 2 * time.Second
+const (
+	slowOp     = 2 * time.Second
+	tallyEvery = 10 * time.Minute
+)
 
 type traceCtxKey struct{}
+
+type sourceCtxKey struct{}
+
+type callTally struct {
+	mu     sync.Mutex
+	since  time.Time
+	counts map[string]map[string]int
+}
+
+var slackCalls = &callTally{since: time.Now(), counts: map[string]map[string]int{}}
+
+func withSource(ctx context.Context, source string) context.Context {
+	return context.WithValue(ctx, sourceCtxKey{}, source)
+}
+
+func callSource(ctx context.Context) string {
+	if t, ok := ctx.Value(traceCtxKey{}).(*callTrace); ok {
+		return string(t.op)
+	}
+	if source, ok := ctx.Value(sourceCtxKey{}).(string); ok {
+		return source
+	}
+	if ctx.Value(sweepKey{}) != nil {
+		return "card sweep"
+	}
+	return "background"
+}
+
+func (t *callTally) add(method, source string, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if now.Sub(t.since) >= tallyEvery {
+		log.Printf("slack calls in the last %s: %s", now.Sub(t.since).Round(time.Second), t.line())
+		t.since, t.counts = now, map[string]map[string]int{}
+	}
+	if t.counts[method] == nil {
+		t.counts[method] = map[string]int{}
+	}
+	t.counts[method][source]++
+}
+
+func (t *callTally) line() string {
+	methods := slices.SortedFunc(maps.Keys(t.counts), func(a, b string) int { return cmp.Compare(total(t.counts[b]), total(t.counts[a])) })
+	parts := make([]string, 0, len(methods))
+	for _, method := range methods {
+		sources := slices.SortedFunc(maps.Keys(t.counts[method]), func(a, b string) int { return cmp.Compare(t.counts[method][b], t.counts[method][a]) })
+		by := make([]string, 0, len(sources))
+		for _, source := range sources {
+			by = append(by, fmt.Sprintf("%s %d", source, t.counts[method][source]))
+		}
+		parts = append(parts, fmt.Sprintf("%s %d (%s)", method, total(t.counts[method]), strings.Join(by, ", ")))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func total(counts map[string]int) int {
+	n := 0
+	for _, count := range counts {
+		n += count
+	}
+	return n
+}
 
 type callSpan struct {
 	calls int
@@ -24,6 +92,7 @@ type callSpan struct {
 
 type callTrace struct {
 	mu     sync.Mutex
+	op     daemon.Op
 	began  time.Time
 	posted time.Duration
 	spans  map[string]*callSpan
@@ -71,7 +140,7 @@ func traced(ctx context.Context, name string, took time.Duration) {
 
 func timedOp(op daemon.Op, h daemon.HandlerFunc) daemon.HandlerFunc {
 	return func(hc daemon.HandlerCtx) daemon.Reply {
-		trace := &callTrace{began: time.Now(), spans: map[string]*callSpan{}}
+		trace := &callTrace{op: op, began: time.Now(), spans: map[string]*callSpan{}}
 		hc.Ctx = context.WithValue(hc.Ctx, traceCtxKey{}, trace)
 		reply := h(hc)
 		if took := time.Since(trace.began); took >= slowOp {
@@ -89,6 +158,7 @@ func (d timedDoer) Do(req *http.Request) (*http.Response, error) {
 	name := req.URL.Host + " " + path.Base(req.URL.Path)
 	if strings.HasSuffix(req.URL.Host, "slack.com") {
 		name = path.Base(req.URL.Path)
+		slackCalls.add(name, callSource(req.Context()), time.Now())
 	}
 	traced(req.Context(), name, time.Since(began))
 	return resp, err
