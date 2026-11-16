@@ -19,10 +19,11 @@ order.
    `term_` handle, `G`/`R`/`L` ids, `brw_`/`run_`/`exec_`/`ctx_` ids, but not a
    table, column or label with no digit after that prefix, such as the
    `run_claims` table, ULIDs, bare `#N`
-   and build or PR numbers, bare URLs and links shown as their own URL, a
-   Sentry issue or Datadog monitor included, since Slack still unfurls one
-   under words that name it, and a Slack message link, which draws an open
-   card under such words once a thread,
+   and build or PR numbers, bare URLs and links shown as their own URL,
+   except an alert's own Sentry issue or Datadog monitor, incident, or event
+   link alone on its own line, which stays bare so Slack unfurls it, and a
+   Slack message link, which draws an open card under words that name it
+   once a thread,
    one-letter codenames such as "D", but not a letter naming an option such as
    "Direction B", multi-agent terms such as desk, walker, parity, and fence,
    and order and job ids such as o308, but never inside a function,

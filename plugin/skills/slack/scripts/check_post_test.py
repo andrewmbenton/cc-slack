@@ -79,6 +79,10 @@ class CheckPostTest(unittest.TestCase):
             ],
         )
 
+    def test_accepts_an_alerts_own_sentry_or_datadog_link_alone_on_its_line_so_it_unfurls(self) -> None:
+        text = "The connection reset fired once.\nhttps://acme.sentry.io/issues/4512345678/\n<https://app.datadoghq.com/monitors/123456>"
+        self.assertEqual(kinds(text), [])
+
     def test_accepts_sentry_and_datadog_links_under_words_that_name_them(self) -> None:
         text = "The <https://acme.sentry.io/issues/4512345678/|connection reset error> fired once; <https://app.datadoghq.com/monitors/123456|the ingest monitor> stayed green."
         self.assertEqual(kinds(text), [])

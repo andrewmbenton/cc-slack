@@ -20,8 +20,9 @@ LEADING_THE = re.compile(r"^the\s+", re.IGNORECASE)
 NUMBER = re.compile(r"\d+")
 OWN_NUMBER = r"(?<![\w#.:/-]){}(?![\w%:/-]|[.,]\d)"
 IDS_ASKED = re.compile(r"(?<![\w'’])ids?(?![\w'’])", re.IGNORECASE)
+ALERT_LINE = re.compile(r"\s*<?https://(?:[\w-]+\.sentry\.io/issues/|sentry\.io/organizations/[\w-]+/issues/|app\.datadoghq\.com/(?:monitors|incidents|event)/)\S*?>?\s*")
 UNLABELED_LINK = re.compile(r"<((?:https?://|mailto:)[^<>|\s]+)(?:\|\s*\1\s*)?>")
-BARE_URL_FIX = "wrap it as <url|short label>, words saying what it opens; Slack draws a Slack message under words that name it and still unfurls a Sentry issue or Datadog monitor under them"
+BARE_URL_FIX = "wrap it as <url|short label>, words saying what it opens; Slack draws a Slack message under words that name it, and only an alert's own Sentry issue or Datadog monitor, incident, or event link stays bare, alone on its own line, so Slack unfurls it"
 ONE_PARAGRAPH_WORDS = 60
 
 
@@ -243,7 +244,7 @@ def check(text: str, asked: Sequence[str] = ()) -> list[Finding]:
     for number, (line, fenced) in enumerate(fenced_lines(text), start=1):
         masked = {labels: plain(line, labels) for labels in (False, True)}
         for rule in RULES:
-            if fenced and not (rule.reads_code and rule.reads_fences):
+            if fenced and not (rule.reads_code and rule.reads_fences) or rule.kind == "bare-url" and ALERT_LINE.fullmatch(line):
                 continue
             span = "token" if "token" in rule.pattern.groupindex else 0
             read = masked[rule.reads_labels] if rule.reads_code else mask_code(masked[rule.reads_labels])
@@ -267,7 +268,7 @@ def unlabeled_links(text: str) -> list[Finding]:
     return [
         Finding(number, match.start() + 1, "bare-url", match[0], BARE_URL_FIX)
         for number, (line, fenced) in enumerate(fenced_lines(text), start=1)
-        if not fenced
+        if not (fenced or ALERT_LINE.fullmatch(line))
         for match in UNLABELED_LINK.finditer(mask_code(line))
     ]
 
