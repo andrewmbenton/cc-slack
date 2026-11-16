@@ -73,7 +73,7 @@ def named_drive() -> dict[str, Any] | None:
 
 
 def drive_session(evt: BaseHookEvent) -> bool:
-    return any(reqenv.getenv(name) for name in DRIVE_ENV) or bound_to_drive(evt.session_id or "")
+    return any(reqenv.getenv(name) for name in DRIVE_ENV) or bound_to_drive(evt._raw.get("session_id") or "")
 
 
 def his_dm() -> set[str]:
@@ -88,7 +88,7 @@ def his_dm() -> set[str]:
 def drive_home(evt: BaseHookEvent) -> bool:
     if not isinstance(evt, ToolHookEvent) or not (writes := pending(evt)):
         return False
-    if (saved := bound_drive(evt.session_id or "") or named_drive()) is None:
+    if (saved := bound_drive(evt._raw.get("session_id") or "") or named_drive()) is None:
         return False
     home = drive_channels(saved) | his_dm()
     return all(write.channel in home for write in writes)
