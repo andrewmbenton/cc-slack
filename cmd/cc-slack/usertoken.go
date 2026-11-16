@@ -34,7 +34,7 @@ const (
 
 var (
 	consentRedirect = "http://localhost:38427" + consentPath
-	userScopes      = []string{"channels:history", "chat:write", "files:read", "groups:history", "groups:read", "groups:write", "im:history", "im:read", "mpim:history", "mpim:read", "reactions:write"}
+	userScopes      = []string{"channels:history", "chat:write", "files:read", "groups:history", "groups:read", "groups:write", "im:history", "im:read", "mpim:history", "mpim:read", "reactions:write", "search:read"}
 	errNoUserToken  = errors.New("cc-slack holds no Slack user token on this machine")
 	errNoClientID   = errors.New("the cc-slack config names no [oauth] client_id, the Slack app's client ID its consent link carries")
 )

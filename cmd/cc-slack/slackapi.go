@@ -60,6 +60,7 @@ type slackAPI interface {
 	DeleteCanvasContext(ctx context.Context, canvasID string) error
 	ShareFilesContext(ctx context.Context, share fileShare) error
 	DocCardsContext(ctx context.Context, serviceURL, channelID, text string) ([]slack.WorkObjectEntity, error)
+	SearchMessagesContext(ctx context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error)
 	RawMessage(ctx context.Context, channelID, threadTS, ts string) (json.RawMessage, error)
 }
 

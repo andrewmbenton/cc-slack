@@ -91,6 +91,8 @@ type fakeSlack struct {
 	topics    map[string]string
 	cards     []slack.WorkObjectEntity
 	asked     []string
+	searched  []string
+	matches   []slack.SearchMessage
 	clock     int64
 	canvases  map[string]fakeCanvas
 	boards    map[string]string
@@ -1336,4 +1338,14 @@ func (f *fakeSlack) setDM(channelID string, users ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.dms[channelID] = users
+}
+
+func (f *fakeSlack) SearchMessagesContext(_ context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("search.messages"); err != nil {
+		return nil, err
+	}
+	f.searched = append(f.searched, query)
+	return &slack.SearchMessages{Matches: f.matches[:min(len(f.matches), params.Count)], Total: len(f.matches)}, nil
 }

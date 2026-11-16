@@ -97,6 +97,7 @@ func root() *cobra.Command {
 		applyCmd(d),
 		threadCmd(d),
 		historyCmd(d),
+		searchCmd(d),
 		fileCmd(d),
 		dmPeerCmd(d),
 		channelInfoCmd(d),

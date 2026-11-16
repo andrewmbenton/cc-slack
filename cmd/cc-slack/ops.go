@@ -116,6 +116,9 @@ type opBody struct {
 	Purpose   string            `json:"purpose"`
 	Prefix    string            `json:"prefix"`
 	Query     string            `json:"query"`
+	From      string            `json:"from"`
+	After     string            `json:"after"`
+	Before    string            `json:"before"`
 	FileID    string            `json:"file_id"`
 	Out       string            `json:"out"`
 	Broadcast bool              `json:"broadcast"`
@@ -236,6 +239,8 @@ type threadResult struct {
 
 type historyResult struct {
 	ChannelID string        `json:"channel_id"`
+	Query     string        `json:"query,omitempty"`
+	Total     int           `json:"total,omitempty"`
 	Messages  []readMessage `json:"messages"`
 	Partial   bool          `json:"partial,omitempty"`
 }
@@ -1533,6 +1538,9 @@ func (a *app) handleHistory(hc daemon.HandlerCtx) daemon.Reply {
 	b, err := decodeBody(hc)
 	if err != nil {
 		return fail(err.Error())
+	}
+	if b.Query != "" || b.From != "" || b.After != "" || b.Before != "" {
+		return a.searchMessages(hc, b)
 	}
 	if b.ChannelID == "" {
 		return fail("history needs channel_id (or a Slack url)")

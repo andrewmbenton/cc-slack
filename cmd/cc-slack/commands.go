@@ -728,10 +728,45 @@ func historyCmd(d cmd.Deps) *cobra.Command {
 	return c
 }
 
+func searchCmd(d cmd.Deps) *cobra.Command {
+	var (
+		f                              sessionFlags
+		channelID, from, after, before string
+		limit                          int
+		asJSON                         bool
+	)
+	c := &cobra.Command{
+		Use:   "search [words...]",
+		Short: "Search Slack messages as you, newest first, with each match's permalink and whole text",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(c *cobra.Command, args []string) error {
+			body := map[string]any{"query": strings.Join(args, " "), "channel_id": channelID, "from": from, "after": after, "before": before, "limit": limit}
+			if body["query"] == "" && from == "" && after == "" && before == "" {
+				return errors.New("search needs words, --from, --after or --before")
+			}
+			return renderOp(c, d, f, opHistory, body, asJSON, renderHistory)
+		},
+	}
+	f.bind(c)
+	c.Flags().StringVar(&channelID, "channel", "", "only messages in this Slack channel id, or a user id for your DM with the app")
+	c.Flags().StringVar(&from, "from", "", "only messages from this user id or handle")
+	c.Flags().StringVar(&after, "after", "", "only messages after this day, YYYY-MM-DD, as Slack's after: reads it")
+	c.Flags().StringVar(&before, "before", "", "only messages before this day, YYYY-MM-DD, as Slack's before: reads it")
+	c.Flags().IntVar(&limit, "limit", defaultHistoryLimit, "matches to print, up to 100")
+	c.Flags().BoolVar(&asJSON, "json", false, "print the daemon's JSON result")
+	return c
+}
+
 func renderHistory(w io.Writer, res historyResult) {
+	if res.Query != "" {
+		_, _ = fmt.Fprintf(w, "search %q: %d of %d matches, newest first\n", res.Query, len(res.Messages), res.Total)
+	}
 	for _, m := range res.Messages {
-		text, _, _ := strings.Cut(m.Text, "\n")
+		text, rest, _ := strings.Cut(m.Text, "\n")
 		readLine(w, m, text)
+		if res.Query != "" {
+			indented(w, "  ", rest)
+		}
 	}
 	if res.Partial {
 		_, _ = fmt.Fprintf(w, "partial: ran out of time after the newest %d messages; ask for fewer\n", len(res.Messages))
