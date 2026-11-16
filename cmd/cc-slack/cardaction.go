@@ -1851,11 +1851,8 @@ func settledMessage(blocks []slack.Block, line string) (string, []slack.Block) {
 			settled = append(settled, header(title))
 			continue
 		}
-		switch b := block.(type) {
-		case *slack.SectionBlock:
-			if strings.HasPrefix(b.BlockID, cardAskBlock) && b.Accessory != nil {
-				settled = append(settled, b)
-			}
+		if b, ok := block.(*slack.SectionBlock); ok && strings.HasPrefix(b.BlockID, cardAskBlock) && b.Accessory != nil {
+			settled = append(settled, b)
 		}
 	}
 	return title, append(settled, mrkdwn(cardTappedBlock+cardActionsBlock, line))

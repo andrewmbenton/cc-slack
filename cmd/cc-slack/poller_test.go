@@ -27,10 +27,15 @@ func TestPollerPollsOnlyTheDMWithoutWatches(t *testing.T) {
 	if r, h := f.slack.callCount(methodReplies), f.slack.callCount(methodHistory); r != 0 || h != 1 {
 		t.Fatalf("slack calls = %d replies, %d history; want one DM history poll", r, h)
 	}
-	f.now = f.now.Add(time.Hour)
+	f.now = f.now.Add(resweepEvery - time.Second)
 	f.tick()
 	if h := f.slack.callCount(methodHistory); h != 1 {
-		t.Fatalf("history calls an hour later with no nudge = %d, want 1", h)
+		t.Fatalf("history calls before the sweep with no nudge = %d, want 1", h)
+	}
+	f.now = f.now.Add(time.Second)
+	f.tick()
+	if h := f.slack.callCount(methodHistory); h != 2 {
+		t.Fatalf("history calls at the sweep = %d, want 2", h)
 	}
 }
 
@@ -40,7 +45,7 @@ func TestPollerPollsAWatchedThreadOnlyWhenNudged(t *testing.T) {
 	f.tick()
 	calls := f.slack.callCount(methodReplies)
 	f.slack.add(testChannel, reply("1800000000.000300", "looks good"))
-	f.now = f.now.Add(time.Hour)
+	f.now = f.now.Add(resweepEvery - time.Second)
 	f.tick()
 	if n := f.slack.callCount(methodReplies); n != calls || len(f.plane.events) != 0 {
 		t.Fatalf("replies calls = %d (was %d), events = %d: the thread polled with no nudge", n, calls, len(f.plane.events))
