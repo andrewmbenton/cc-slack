@@ -30,10 +30,11 @@ const (
 	refHostGitHub     = "github"
 	refHostBuildkite  = "buildkite"
 	liveUpdateTimeout = 30 * time.Second
+	tapYield          = 2 * time.Second
 	carriedMoreText   = "More to answer from the message above"
 )
 
-var goneCardCodes = map[string]bool{"message_not_found": true, "cant_update_message": true, "channel_not_found": true}
+var goneCardCodes = map[string]bool{"message_not_found": true, "cant_update_message": true, "channel_not_found": true, "is_inactive": true, "is_archived": true}
 
 func liveCardsPath() string { return filepath.Join(appPaths().StateDir(), "live-cards.db") }
 
@@ -308,6 +309,8 @@ type liveCards struct {
 	hosts        map[string]*refHost
 	drawing      map[string]*sync.Mutex
 	undrawn      map[string]map[string]bool
+	sweepFrom    string
+	tapping      atomic.Int32
 }
 
 func (l *liveCards) canvas() canvas {
@@ -1806,25 +1809,45 @@ func (l *liveCards) redrawClosedUndos(ctx context.Context, id identity, closed [
 func (l *liveCards) redrawChanged(ctx context.Context, api slackAPI, changed map[string]bool, now time.Time) time.Time {
 	l.mu.Lock()
 	keys := slices.Sorted(maps.Keys(l.threads))
+	if l.sweepFrom != "" {
+		at, _ := slices.BinarySearch(keys, l.sweepFrom)
+		keys = slices.Concat(keys[at:], keys[:at])
+	}
+	l.sweepFrom = ""
 	l.mu.Unlock()
 	ctx = withoutRateWait(ctx)
 	for i, k := range keys {
+		if l.tapping.Load() > 0 {
+			l.deferSweep(keys[i:], changed)
+			l.log.Printf("live cards: a tap is being drawn, so %d threads redraw after it", len(keys)-i)
+			return now.Add(tapYield)
+		}
 		rate, limited := errors.AsType[*slack.RateLimitedError](l.redrawMoved(ctx, api, k, changed, now))
 		if !limited {
 			continue
 		}
-		l.mu.Lock()
-		for _, k := range keys[i:] {
-			if l.undrawn[k] == nil {
-				l.undrawn[k] = map[string]bool{}
-			}
-			maps.Copy(l.undrawn[k], changed)
-		}
-		l.mu.Unlock()
+		l.deferSweep(keys[i:], changed)
 		l.log.Printf("live cards: Slack limits chat.update for %s, so %d threads redraw after it", rate.RetryAfter, len(keys)-i)
 		return now.Add(rate.RetryAfter)
 	}
 	return time.Time{}
+}
+
+func (l *liveCards) deferSweep(rest []string, changed map[string]bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, k := range rest {
+		if l.undrawn[k] == nil {
+			l.undrawn[k] = map[string]bool{}
+		}
+		maps.Copy(l.undrawn[k], changed)
+	}
+	l.sweepFrom = rest[0]
+}
+
+func (l *liveCards) drawingTap() func() {
+	l.tapping.Add(1)
+	return func() { l.tapping.Add(-1) }
 }
 
 func (l *liveCards) redrawMoved(ctx context.Context, api slackAPI, key string, changed map[string]bool, now time.Time) error {

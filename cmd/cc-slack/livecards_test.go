@@ -771,6 +771,9 @@ func TestWaitingCardTapCarriesTheQuestionAndAnswersOnce(t *testing.T) {
 	if got := l.inject(agent.TopLevel); got != "" {
 		t.Fatalf("a second tap on an answered waiting ask steered %q", got)
 	}
+	if said := l.slack.ephemerals(); len(said) != 1 || !strings.Contains(said[0], "Your answer *Merge* is recorded") {
+		t.Fatalf("a second tap showed him %q, want one note naming the answer on record", said)
+	}
 }
 
 func TestAQuestionCardTapAndItsUndoReachTheCardCommandAsHisAnswer(t *testing.T) {

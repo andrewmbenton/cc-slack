@@ -245,6 +245,7 @@ type askAnswer struct {
 	Drawn       bool      `json:"drawn,omitempty"`
 	Undelivered string    `json:"undelivered,omitempty"`
 	Withdrawn   bool      `json:"withdrawn,omitempty"`
+	Settled     bool      `json:"settled,omitempty"`
 	Tap         string    `json:"tap,omitempty"`
 	UndoUntil   time.Time `json:"undo_until,omitzero"`
 	Owed        *owedTap  `json:"owed,omitempty"`
