@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
+import sqlite3
 import subprocess
 import time
 from collections.abc import Callable
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, replace
@@ -44,6 +47,8 @@ CHECK_SECONDS = 8
 DEADLINE_MARGIN = 5
 DRIVE_ENV = ("CLAUDE_LONG_RUNNING_DRIVE", "CLAUDE_LONG_RUNNING_LANE")
 DRIVE_WRITE = "a drive session's Slack write, which the drive checks itself"
+DRIVE_BINDINGS = "SELECT collection, key, body FROM rows WHERE collection = '' AND key IN ('driver', 'roles', 'subcoordinators') OR collection = 'handlers'"
+UNREAD_DRIVE = (OSError, sqlite3.Error, ValueError, LookupError, AttributeError)
 CHECK_FAILURES = (OSError, LookupError, ValueError, RuntimeError, TypeError, AttributeError, subprocess.SubprocessError)
 UNFINISHED = "{gate}: the check did not finish ({cause}), so this write goes ahead unchecked"
 GRANT_LABEL = "slack-grant:"
@@ -840,8 +845,41 @@ def bounded(work: Callable[[], HookResult]) -> HookResult:
         pool.shutdown(wait=False)
 
 
-def drive_session() -> bool:
-    return any(reqenv.getenv(name) for name in DRIVE_ENV)
+def drive_root() -> Path:
+    if explicit := os.environ.get("LONG_RUNNING_STATE"):
+        return Path(explicit)
+    if xdg := os.environ.get("XDG_STATE_HOME"):
+        return Path(xdg) / "long-running"
+    return Path.home() / ".local" / "state" / "long-running"
+
+
+def saved_drive(folder: Path) -> dict[str, Any]:
+    if (db := folder / "drive.db").is_file():
+        with closing(sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=1)) as conn:
+            rows = conn.execute(DRIVE_BINDINGS).fetchall()
+        return {key: json.loads(body) for collection, key, body in rows if not collection} | {"handlers": {key: json.loads(body) for collection, key, body in rows if collection}}
+    return json.loads((folder / "drive.json").read_text())
+
+
+def drive_sessions(saved: dict[str, Any]) -> set[str]:
+    roles = {"coordinator": saved["driver"]} if "driver" in saved else saved.get("roles", {})
+    return {entry.get("session") for entry in (*roles.values(), *saved.get("subcoordinators", {}).values(), *saved.get("handlers", {}).values())}
+
+
+def bound_to_drive(session: str) -> bool:
+    if not session or not (root := drive_root()).is_dir():
+        return False
+    for folder in root.iterdir():
+        try:
+            if session in drive_sessions(saved_drive(folder)):
+                return True
+        except UNREAD_DRIVE:
+            continue
+    return False
+
+
+def drive_session(evt: BaseHookEvent) -> bool:
+    return any(reqenv.getenv(name) for name in DRIVE_ENV) or bound_to_drive(evt.session_id or "")
 
 
 def named_ticket(evt: PreToolUseEvent, ctx: Context, ticket: Ticket) -> HookResult:
@@ -906,16 +944,16 @@ def slack_writes_need_permission(evt: PreToolUseEvent) -> HookResult | None:
         return plan_checked(evt, write)
     if write.fields.get("text_file") in written_files(evt):
         return evt.block(DRAFTED.format(flag="text-file"))
-    if drive_session() and not write.daemon:
-        return evt.allow()
     resolved = [Conversation(write.channel, write.thread)]
     try:
-        return bounded(lambda: (drive_write if drive_session() else judged)(evt, write, resolved))
+        return bounded(lambda: (drive_write if drive_session(evt) else judged)(evt, write, resolved))
     except CHECK_FAILURES as exc:
         return unchecked(evt, write, resolved[0], exc)
 
 
 def drive_write(evt: PreToolUseEvent, write: Write, resolved: list[Conversation]) -> HookResult:
+    if not write.daemon:
+        return evt.allow()
     resolved[0] = conversation(write)
     ctx = context_of(evt, write, resolved[0])
     logger.bind(hook=GATE, agent=evt.agent_id or "main", tool=evt.tool_name, allowed=True, detail=DRIVE_WRITE).info("slack write checked")
