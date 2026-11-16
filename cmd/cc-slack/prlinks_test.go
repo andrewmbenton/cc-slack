@@ -411,52 +411,25 @@ func TestATapPostAsksAgainWhenThePRsStandingCardWaitsOnNoTap(t *testing.T) {
 	}
 }
 
-func TestEachTapLineInAThreadGetsTheOpenCardRightUnderItAndRetiresTheOneBefore(t *testing.T) {
+func TestATapLineInAThreadLinksTheCardWhereItWasDrawnAndNeverMovesIt(t *testing.T) {
 	const hisThread = "1793804574.412309"
 	cmd := fakeCardCommand(t, []string{"acme/app#41"}, mergeRowCard())
 	l, _ := cardingDaemon(t, cmd.argv, "acme/app#41")
 	l.do(opDMStatus, map[string]any{"text": "#41 is green", "tap_prs": tapPR41})
 	root := rootCards(awaitPRCards(t, l, testDM))[0]
-	lastEdit := func(card fakePost) string {
-		edits := editsOf(l.slack.edited(), card.ts)
-		if len(edits) == 0 {
-			return ""
+	for _, text := range []string{"#41 still waits on your tap", "#41 waits on your tap again"} {
+		l.do(opDMStatus, map[string]any{"thread_ts": hisThread, "text": text, "tap_prs": tapPR41})
+	}
+	eventually(t, "a link to the card in his thread", func() bool {
+		return len(slices.DeleteFunc(cardLinks(l, root), func(p fakePost) bool { return p.threadTS != hisThread })) > 0
+	})
+	if cards := prCards(l, testDM); len(cards) != 1 || cards[0].ts != root.ts {
+		t.Fatalf("PR cards = %+v, want the one card where it was drawn", cards)
+	}
+	for _, edit := range editsOf(l.slack.edited(), root.ts) {
+		if strings.Contains(edit, "*Replaced:*") {
+			t.Fatalf("card edits = %v, want the card standing where it was drawn", edit)
 		}
-		return edits[len(edits)-1]
-	}
-	asked := func(text string) fakePost {
-		t.Helper()
-		var sent map[string]string
-		if err := json.Unmarshal(l.do(opDMStatus, map[string]any{"thread_ts": hisThread, "text": text, "tap_prs": tapPR41}).Body, &sent); err != nil {
-			t.Fatal(err)
-		}
-		card := postUnder(t, l, hisThread, sent["ts"])
-		if sent["card_ts"] != card.ts || !strings.Contains(card.blocks, "Merge (Recommended)") || !strings.Contains(card.blocks, `"Hold"`) || !strings.Contains(card.blocks, testWaits) {
-			t.Fatalf("dm-status = %v, post under %q = %+v; want the PR's card with Merge and Hold right under the line, named in the reply", sent, text, card)
-		}
-		return card
-	}
-	retired := func(old, fresh fakePost) {
-		t.Helper()
-		eventually(t, "the earlier card marked replaced", func() bool { return strings.Contains(lastEdit(old), "*Replaced:* "+cardAskedAgain) })
-		if now := lastEdit(old); strings.Contains(now, cardWaitAction) || !strings.Contains(now, strings.ReplaceAll(fresh.ts, ".", "")) {
-			t.Fatalf("earlier card = %s, want no buttons and a link to the card under the newer line", now)
-		}
-	}
-
-	first := asked("#41 still waits on your tap")
-	retired(root, first)
-	if links := slices.DeleteFunc(cardLinks(l, root), func(p fakePost) bool { return p.threadTS != hisThread }); len(links) != 0 {
-		t.Fatalf("links to the root card in his thread = %+v, want the card itself under the line and no link", links)
-	}
-	second := asked("#41 waits on your tap again")
-	retired(first, second)
-	var listed driveCardsResult
-	if err := json.Unmarshal(l.do(opDriveCards, map[string]any{"name": "demo"}).Body, &listed); err != nil {
-		t.Fatal(err)
-	}
-	if len(listed.PRCards) != 1 || !strings.Contains(listed.PRCards[0].URL, strings.ReplaceAll(second.ts, ".", "")) {
-		t.Fatalf("drive-cards = %+v, want the card under the newest line alone", listed.PRCards)
 	}
 
 	if err := os.WriteFile(filepath.Join(filepath.Dir(cmd.argv[0]), "cards.json"), mustJSON(map[string]any{"cards": []providedCard{movedCard()}}), 0o600); err != nil {
@@ -464,7 +437,7 @@ func TestEachTapLineInAThreadGetsTheOpenCardRightUnderItAndRetiresTheOneBefore(t
 	}
 	posts := len(l.slack.sentTo(testDM))
 	l.do(opRedrawPRCards, map[string]any{})
-	eventually(t, "the newest card redrawn", func() bool { return len(editsOf(l.slack.edited(), second.ts)) > 0 })
+	eventually(t, "the card redrawn", func() bool { return len(editsOf(l.slack.edited(), root.ts)) > 0 })
 	if len(l.slack.sentTo(testDM)) != posts {
 		t.Fatalf("posts = %+v, want a redraw to edit the card in place and post nothing", l.slack.sentTo(testDM)[posts:])
 	}
@@ -1138,23 +1111,23 @@ func TestOnePostNamingAStackDrawsOneCardAndMarksAMembersOlderCardReplaced(t *tes
 			}
 
 			replaced := oldNow()
-			var sent map[string]string
-			if err := json.Unmarshal(l.do(opDMStatus, map[string]any{"thread_ts": laterThread, "text": "the stack still waits on you", "tap_prs": urls}).Body, &sent); err != nil {
-				t.Fatal(err)
-			}
-			later := postUnder(t, l, laterThread, sent["ts"])
-			if len(drawn()) != 3 || later.ts != drawn()[2].ts {
-				t.Fatalf("PR cards %+v; want the stack's card posted again right under the later post", drawn())
-			}
-			eventually(t, "the stack's card in his thread marked replaced", func() bool {
-				edits := editsOf(l.slack.edited(), fresh.ts)
-				return len(edits) > 0 && strings.Contains(edits[len(edits)-1], "*Replaced:* "+cardAskedAgain)
+			l.do(opDMStatus, map[string]any{"thread_ts": laterThread, "text": "the stack still waits on you", "tap_prs": urls})
+			eventually(t, "a link to the stack's card in the later thread", func() bool {
+				return len(slices.DeleteFunc(cardLinks(l, fresh), func(p fakePost) bool { return p.threadTS != laterThread })) > 0
 			})
-			asked, redrawn := len(prAsks(cmd.requests(t))), len(editsOf(l.slack.edited(), later.ts))
+			if len(drawn()) != 2 {
+				t.Fatalf("PR cards %+v; want the stack's card left where it was drawn", drawn())
+			}
+			for _, edit := range editsOf(l.slack.edited(), fresh.ts) {
+				if strings.Contains(edit, "*Replaced:*") {
+					t.Fatalf("stack card edits = %v, want it standing where it was drawn", edit)
+				}
+			}
+			asked, redrawn := len(prAsks(cmd.requests(t))), len(editsOf(l.slack.edited(), fresh.ts))
 			l.do(opRedrawPRCards, map[string]any{})
-			eventually(t, "the stack's newest card redrawn in place", func() bool { return len(editsOf(l.slack.edited(), later.ts)) > redrawn })
-			if len(drawn()) != 3 || len(prAsks(cmd.requests(t))) != asked+1 || oldNow() != replaced {
-				t.Fatalf("PR cards %+v; want no fourth card, the redraw's one ask alone, and #42's card left as replaced", drawn())
+			eventually(t, "the stack's card redrawn in place", func() bool { return len(editsOf(l.slack.edited(), fresh.ts)) > redrawn })
+			if len(drawn()) != 2 || len(prAsks(cmd.requests(t))) != asked+1 || oldNow() != replaced {
+				t.Fatalf("PR cards %+v; want no third card, the redraw's one ask alone, and #42's card left as replaced", drawn())
 			}
 		})
 	}

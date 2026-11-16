@@ -40,10 +40,7 @@ func tapCallContext(ctx context.Context, op daemon.Op, body json.RawMessage) (co
 	return context.WithTimeout(ctx, tapCardPatience+tapPostPatience)
 }
 
-const (
-	prCardWords    = "Words"
-	cardAskedAgain = "asked again under a newer line"
-)
+const prCardWords = "Words"
 
 var errCardCommandUnfinished = errors.New("the card command did not finish")
 
@@ -73,7 +70,6 @@ type providedCard struct {
 
 	replaces []replacedCard
 	reasks   bool
-	moves    bool
 }
 
 type replacedCard struct {
@@ -333,10 +329,9 @@ type tapCards struct {
 	provided     []providedCard
 	undrawn      map[string]string
 	settles      []string
-	moves        bool
 }
 
-func (a *app) askTapCards(ctx context.Context, id identity, scope, channelID, thread string, b opBody, moves bool) tapCards {
+func (a *app) askTapCards(ctx context.Context, id identity, scope, channelID, thread string, b opBody) tapCards {
 	if len(b.TapPRs) == 0 || tapCardsRefused(id, channelID) != "" {
 		return tapCards{}
 	}
@@ -346,13 +341,10 @@ func (a *app) askTapCards(ctx context.Context, id identity, scope, channelID, th
 			a.poller.log.Printf("tap PR %s draws no card: it is %s", prURL(pr.ref), pr.state.State)
 		}
 	}
-	t := tapCards{undrawn: map[string]string{}, moves: moves}
-	t.ask, t.standing, t.waiting = a.cards.toCard(channelID, thread, channelID == id.DMChannelID, moves, b.Card, prs)
+	t := tapCards{undrawn: map[string]string{}}
+	t.ask, t.standing, t.waiting = a.cards.toCard(channelID, thread, channelID == id.DMChannelID, b.Card, prs)
 	if len(t.ask) > 0 {
 		a.askCardCommand(ctx, id, channelID, thread, &t)
-	}
-	for i := range t.provided {
-		t.provided[i].moves = moves
 	}
 	return t
 }
@@ -404,7 +396,7 @@ func (a *app) tapCardsFirst(ctx context.Context, id identity, scope, channelID, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, tapCardPatience)
 	defer cancel()
-	t := a.askTapCards(ctx, id, scope, channelID, under, b, b.Card == nil && under != "")
+	t := a.askTapCards(ctx, id, scope, channelID, under, b)
 	if said := undrawnAsked(asked, t.undrawn); len(said) > 0 {
 		return tapCards{}, fmt.Errorf("drew no card for tap_prs %s", strings.Join(said, "; "))
 	}
@@ -470,16 +462,7 @@ func (a *app) placeTapCards(ctx context.Context, db *sql.DB, sub subject.Subject
 	}
 	warning, placed, undrawn := a.attachPRCards(context.WithoutCancel(ctx), db, sub, id, post.channel, post.thread, post.ts, t)
 	notePostWarning(ctx, warning)
-	if !t.moves {
-		return tapDrawn{cards: placed}, undrawn
-	}
-	carried := slices.DeleteFunc(slices.Clone(placed), func(card cardRef) bool {
-		return a.cards.awaitsTap(card.channel, card.ts) && (card.thread != post.thread || !tsLess(post.ts, card.ts))
-	})
-	for _, pr := range a.cards.uncarded(carried, t.waiting) {
-		undrawn[pr.key()] = cmp.Or(undrawn[pr.key()], "its card did not go under the line; the daemon log says why")
-	}
-	return tapDrawn{cards: carried}, undrawn
+	return tapDrawn{cards: placed}, undrawn
 }
 
 func cardStamps(cards []cardRef) []string {
@@ -512,7 +495,7 @@ func (a *app) attachPRCards(ctx context.Context, db *sql.DB, sub subject.Subject
 	return a.approvesCarried(ctx, id, cardRef{channelID, postTS, postTS}, placed, t.waiting), placed, undrawn
 }
 
-func (l *liveCards) toCard(channelID, postThread string, dm, moves bool, posting *statusCard, prs []linkedPR) (asked []refID, standing []cardRef, waiting []refID) {
+func (l *liveCards) toCard(channelID, postThread string, dm bool, posting *statusCard, prs []linkedPR) (asked []refID, standing []cardRef, waiting []refID) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	post := l.draft(channelID, postThread)
@@ -520,7 +503,7 @@ func (l *liveCards) toCard(channelID, postThread string, dm, moves bool, posting
 		post.Reply = &liveMessage{Card: *posting}
 	}
 	named := slices.DeleteFunc(slices.Clone(prs), func(pr linkedPR) bool { return pr.state.terminal() })
-	if !moves && !slices.ContainsFunc(named, func(pr linkedPR) bool { return !post.shows(map[string]bool{pr.ref.key(): true}) }) {
+	if !slices.ContainsFunc(named, func(pr linkedPR) bool { return !post.shows(map[string]bool{pr.ref.key(): true}) }) {
 		return nil, nil, nil
 	}
 	var stood []cardRef
@@ -532,7 +515,7 @@ func (l *liveCards) toCard(channelID, postThread string, dm, moves bool, posting
 			standing = append(standing, card)
 		}
 	}
-	if !moves && len(standing) == 1 && !slices.Contains(stood, cardRef{}) {
+	if len(standing) == 1 && !slices.Contains(stood, cardRef{}) {
 		return nil, standing, waiting
 	}
 	for i, pr := range named {
@@ -581,16 +564,9 @@ func (a *app) postPRCards(ctx context.Context, db *sql.DB, id identity, channelI
 
 func (a *app) redrawPostedPRCards(ctx context.Context, id identity, channelID, thread string, provided []providedCard) (rest []providedCard, placed []cardRef, shown []map[string]any, replaced []replacedCard) {
 	for _, p := range provided {
-		find := a.regroupedPRCard
-		if p.moves {
-			find = a.postedPRCard
-		}
-		posted, found, others := find(id, channelID, thread, p.Card)
+		posted, found, others := a.regroupedPRCard(id, channelID, thread, p.Card)
 		for _, old := range others {
 			p.replaces = append(p.replaces, replacedCard{old: old, why: regrouped(p.Card)})
-		}
-		if found && p.moves && a.cards.unanswered(posted, p.Card) {
-			p.replaces, found = append(p.replaces, replacedCard{old: posted, why: cardAskedAgain}), false
 		}
 		if !found {
 			rest = append(rest, p)
