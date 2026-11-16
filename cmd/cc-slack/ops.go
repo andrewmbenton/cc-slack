@@ -367,7 +367,7 @@ func (a *app) register(s *daemon.Server) {
 	register(opChannelCreate, a.handleChannel(approveCreate, createChannel))
 	register(opChannelArchive, a.handleChannel(approveArchive, a.archiveChannel))
 	register(opChannelInvite, a.handleChannel(approveInvite, a.inviteToChannel))
-	register(opChannelTopic, a.handleChannel(approveTopic, a.setChannelTopic))
+	register(opChannelTopic, a.handleTopicOrRename(a.handleChannel(approveTopic, a.setChannelTopic)))
 	register(opChannelJoin, a.handleChannel(approveJoin, a.joinChannel))
 }
 
@@ -2849,6 +2849,25 @@ func (a *app) handleOperatorChannel(hc daemon.HandlerCtx) daemon.Reply {
 	return ok(made)
 }
 
+func (a *app) handleTopicOrRename(topic daemon.HandlerFunc) daemon.HandlerFunc {
+	return func(hc daemon.HandlerCtx) daemon.Reply {
+		b, err := decodeBody(hc)
+		if err != nil {
+			return fail(err.Error())
+		}
+		if b.Name == "" && b.Purpose == "" {
+			return topic(hc)
+		}
+		if b.Topic != "" {
+			return fail("channel-topic sets a topic, or renames or describes an operator channel with name and purpose, never both in one call")
+		}
+		if b.ChannelID == "" {
+			return fail("channel-topic with name or purpose needs the operator channel's channel_id (or a Slack url)")
+		}
+		return a.handleOperatorChannel(hc)
+	}
+}
+
 func (a *app) renameOperatorChannel(hc daemon.HandlerCtx, id identity, b opBody) daemon.Reply {
 	i := slices.IndexFunc(id.OperatorChannels, func(c operatorChannel) bool { return c.ID == b.ChannelID })
 	if i < 0 {
@@ -2859,7 +2878,7 @@ func (a *app) renameOperatorChannel(hc daemon.HandlerCtx, id identity, b opBody)
 		return fail(err.Error())
 	}
 	renamed := slices.Clone(id.OperatorChannels)
-	if b.Name != renamed[i].Name {
+	if b.Name != "" && b.Name != renamed[i].Name {
 		ch, err := user.RenameConversationContext(hc.Ctx, b.ChannelID, b.Name)
 		if err != nil {
 			return fail(fmt.Sprintf("rename #%s (%s) to #%s as you: %s", id.OperatorChannels[i].Name, b.ChannelID, b.Name, errorCode(err)))

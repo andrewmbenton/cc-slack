@@ -2476,6 +2476,28 @@ func TestOperatorChannelRenameRenamesItAsHimAndRecordsTheNewName(t *testing.T) {
 	l.refused(opOperatorChan, map[string]any{"name": "team", "channel_id": testChannel}, "not one of your operator channels")
 }
 
+func TestChannelTopicWithNameAndPurposeRenamesAndDescribesAnOperatorChannelAsHim(t *testing.T) {
+	l := startDaemon(t)
+	loggedInWithOAuth(t, l)
+	recordPlatformChannel(t)
+	user := l.user.as(testUser)
+
+	var renamed operatorChannel
+	if err := json.Unmarshal(l.do(opChannelTopic, map[string]any{"channel_id": platformChannel, "name": "durable-agents-prio-releases", "purpose": "Releases. Dashboard: https://dash.example/"}).Body, &renamed); err != nil {
+		t.Fatal(err)
+	}
+	if renamed != (operatorChannel{ID: platformChannel, Name: "durable-agents-prio-releases"}) || user.renames()[platformChannel] != "durable-agents-prio-releases" || user.channelPurposes()[platformChannel] != "Releases. Dashboard: https://dash.example/" {
+		t.Fatalf("renamed %+v, renames %v, purposes %v; want both set with his token", renamed, user.renames(), user.channelPurposes())
+	}
+	if err := json.Unmarshal(l.do(opChannelTopic, map[string]any{"channel_id": platformChannel, "purpose": "Only the description."}).Body, &renamed); err != nil {
+		t.Fatal(err)
+	}
+	if renamed.Name != "durable-agents-prio-releases" || user.channelPurposes()[platformChannel] != "Only the description." {
+		t.Fatalf("renamed %+v, purposes %v; want a purpose alone to keep its name", renamed, user.channelPurposes())
+	}
+	l.refused(opChannelTopic, map[string]any{"channel_id": platformChannel, "name": "x", "topic": "y"}, "never both in one call")
+}
+
 func TestOperatorChannelRenameToItsOwnNameOnlySetsItsDescription(t *testing.T) {
 	l := startDaemon(t)
 	loggedInWithOAuth(t, l)

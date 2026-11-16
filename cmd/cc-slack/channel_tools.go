@@ -223,7 +223,7 @@ var (
 		},
 		{
 			name:        "slack_pickup",
-			description: "Put eyes and Slack's working line on a message you picked up; state updates the line, done clears both.",
+			description: "Put eyes and Slack's working line on a message; state updates the line, done clears both.",
 			op:          opPickup, failure: actionReact,
 			properties: map[string]any{
 				"channel_id": channelProp,
@@ -237,7 +237,7 @@ var (
 		},
 		{
 			name:        "slack_stream",
-			description: "Show work steps with spinners in a thread: the first call, without ts, posts and returns ts; later calls pass ts and changed tasks; stop ends it.",
+			description: "Show work steps with spinners in a thread: the first call posts and returns ts; later calls pass ts and changed tasks; stop ends it.",
 			op:          opStream, failure: actionWrite,
 			properties: map[string]any{
 				"channel_id": channelProp,
@@ -299,12 +299,12 @@ var (
 		},
 		{
 			name:        "slack_thread",
-			description: "Read a thread oldest first; omit channel_id for your DM. A reply needs a read within 10 minutes reaching its newest message, so pass since_ts to read only what is new.",
+			description: "Read a thread oldest first, your DM without channel_id. A reply needs a read of its newest message within 10 minutes; since_ts reads only what is new.",
 			op:          opThread, failure: actionRead,
 			properties: map[string]any{
 				"channel_id": channelProp, "thread_ts": threadProp, "url": urlProp,
 				"limit":    map[string]any{"type": "integer", "description": "default 50"},
-				"since_ts": map[string]any{"type": "string", "description": "only messages newer than this Slack ts, or whole epoch seconds"},
+				"since_ts": map[string]any{"type": "string", "description": "only messages newer than this ts or epoch seconds"},
 				"raw":      rawProp,
 			},
 			lines: func(body json.RawMessage) (string, error) { return linesOf(body, renderThread) },
@@ -354,7 +354,7 @@ var (
 		},
 		{
 			name:        "slack_unwatch",
-			description: "Stop a watch by watch_id, or a thread by channel_id and thread_ts or url; returns the session's remaining top-level watches.",
+			description: "Stop a watch by watch_id, or by channel_id and thread_ts or url; returns your remaining top-level watches.",
 			op:          opUnfollow, failure: actionWatch,
 			properties: map[string]any{"watch_id": map[string]any{"type": "integer"}, "channel_id": channelProp, "thread_ts": threadProp, "url": urlProp},
 		},
@@ -385,13 +385,12 @@ var (
 		},
 		{
 			name:        "slack_channel_topic",
-			description: "Set a channel's topic.",
+			description: "Set a channel's topic, or rename (name) and describe (purpose) your operator channel.",
 			op:          opChannelTopic, failure: actionChannel,
 			properties: map[string]any{
 				"channel_id": channelProp, "url": urlProp,
-				"topic": map[string]any{"type": "string"},
+				"topic": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}, "purpose": map[string]any{"type": "string"},
 			},
-			required: []string{"topic"},
 		},
 		{
 			name:        "slack_channel_join",
@@ -401,7 +400,7 @@ var (
 		},
 		{
 			name:        "slack_card_answer",
-			description: "Answer a waiting or reply card with an answer the user gave elsewhere, or settle it. An answered card keeps its answer, returned as label with already_answered.",
+			description: "Answer a waiting or reply card with the user's answer from elsewhere, or settle it; an answered card returns its label with already_answered.",
 			op:          opCardAnswer, failure: actionWrite,
 			properties: map[string]any{
 				"waits":   map[string]any{"type": "string", "description": "the card's waits or board id"},
