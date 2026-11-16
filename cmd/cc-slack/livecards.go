@@ -31,6 +31,7 @@ const (
 	refHostBuildkite  = "buildkite"
 	liveUpdateTimeout = 30 * time.Second
 	tapYield          = 2 * time.Second
+	sweepWrites       = 30
 	carriedMoreText   = "More to answer from the message above"
 )
 
@@ -310,6 +311,7 @@ type liveCards struct {
 	drawing      map[string]*sync.Mutex
 	undrawn      map[string]map[string]bool
 	sweepFrom    string
+	sweepWrote   []time.Time
 	tapping      atomic.Int32
 }
 
@@ -1574,6 +1576,11 @@ func (l *liveCards) flush(ctx context.Context, api slackAPI, t *liveThread, writ
 }
 
 func (l *liveCards) update(ctx context.Context, api slackAPI, channel string, w cardWrite) error {
+	if ctx.Value(sweepKey{}) != nil {
+		if wait := l.sweepWait(); wait > 0 {
+			return &slack.RateLimitedError{RetryAfter: wait}
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, liveUpdateTimeout)
 	defer cancel()
 	return updateMessage(ctx, api, channel, w.ts, w.text, w.blocks, w.entities...)
@@ -1816,6 +1823,7 @@ func (l *liveCards) redrawChanged(ctx context.Context, api slackAPI, changed map
 	l.sweepFrom = ""
 	l.mu.Unlock()
 	ctx = withoutRateWait(ctx)
+	ctx = context.WithValue(ctx, sweepKey{}, true)
 	for i, k := range keys {
 		if l.tapping.Load() > 0 {
 			l.deferSweep(keys[i:], changed)
@@ -1827,7 +1835,7 @@ func (l *liveCards) redrawChanged(ctx context.Context, api slackAPI, changed map
 			continue
 		}
 		l.deferSweep(keys[i:], changed)
-		l.log.Printf("live cards: Slack limits chat.update for %s, so %d threads redraw after it", rate.RetryAfter, len(keys)-i)
+		l.log.Printf("live cards: chat.update waits %s, by Slack's limit or the sweep's own share of it, so %d threads redraw after it", rate.RetryAfter, len(keys)-i)
 		return now.Add(rate.RetryAfter)
 	}
 	return time.Time{}
@@ -2248,4 +2256,18 @@ func (l *liveCards) prRow(channel, thread, row string) (refID, bool) {
 		}
 	}
 	return refID{}, false
+}
+
+type sweepKey struct{}
+
+func (l *liveCards) sweepWait() time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	l.sweepWrote = slices.DeleteFunc(l.sweepWrote, func(at time.Time) bool { return now.Sub(at) >= time.Minute })
+	if len(l.sweepWrote) >= sweepWrites {
+		return l.sweepWrote[0].Add(time.Minute).Sub(now)
+	}
+	l.sweepWrote = append(l.sweepWrote, now)
+	return 0
 }
