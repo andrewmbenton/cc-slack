@@ -17,7 +17,7 @@ from .writes import pending
 __capt_hook_skip__ = True
 
 DRIVE_ENV = ("CLAUDE_LONG_RUNNING_DRIVE", "CLAUDE_LONG_RUNNING_LANE")
-BINDINGS = "SELECT collection, key, body FROM rows WHERE collection = '' AND key IN ('driver', 'roles', 'subcoordinators', 'slack') OR collection = 'handlers'"
+BINDINGS = "SELECT collection, key, body FROM rows WHERE collection = '' AND key IN ('driver', 'roles', 'subcoordinators', 'communicators', 'slack') OR collection = 'handlers'"
 UNREAD = (OSError, sqlite3.Error, ValueError, LookupError, AttributeError, TypeError, subprocess.SubprocessError)
 WHOAMI_SECONDS = 2
 
@@ -40,7 +40,7 @@ def saved_drive(folder: Path) -> dict[str, Any]:
 
 def drive_sessions(saved: dict[str, Any]) -> set[str]:
     roles = {"coordinator": saved["driver"]} if "driver" in saved else saved.get("roles", {})
-    return {entry.get("session") for entry in (*roles.values(), *saved.get("subcoordinators", {}).values(), *saved.get("handlers", {}).values())}
+    return {entry.get("session") for entry in (*roles.values(), *saved.get("subcoordinators", {}).values(), *saved.get("communicators", {}).values(), *saved.get("handlers", {}).values())}
 
 
 def drive_channels(saved: dict[str, Any]) -> set[str]:

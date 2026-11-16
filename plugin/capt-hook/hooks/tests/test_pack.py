@@ -368,6 +368,7 @@ class PackTest(unittest.TestCase):
                 [
                     ("", "roles", json.dumps({"communicator": {"session": "s-root"}})),
                     ("", "subcoordinators", json.dumps({"Platform": {"session": "s-sub"}})),
+                    ("", "communicators", json.dumps({"Priority o1": {"session": "s-seat"}})),
                     ("", "slack", json.dumps({"channels": {"": {"id": "C0DRIVE0001"}, "Platform": {"id": "C0DRIVE0002"}}})),
                     ("handlers", "h1", json.dumps({"session": "s-handler"})),
                     ("handlers", "h2", json.dumps({"session": None})),
@@ -379,8 +380,8 @@ class PackTest(unittest.TestCase):
         (state / "stray.txt").write_text("")
         with mock.patch.dict(os.environ, {"LONG_RUNNING_STATE": str(state)}):
             self.assertEqual(
-                [drives.bound_to_drive(session) for session in ("s-legacy", "s-root", "s-sub", "s-handler", "s-other", "")],
-                [True, True, True, True, False, False],
+                [drives.bound_to_drive(session) for session in ("s-legacy", "s-root", "s-sub", "s-seat", "s-handler", "s-other", "")],
+                [True, True, True, True, True, False, False],
             )
         reply = THREAD | {"text": "On it."}
         home = {"CLAUDE_LONG_RUNNING_DRIVE": "current", "LONG_RUNNING_STATE": str(state)}
