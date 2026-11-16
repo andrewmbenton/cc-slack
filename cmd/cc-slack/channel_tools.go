@@ -78,13 +78,17 @@ func invokeOnce(ctx context.Context, d cmd.Deps, session, scope string, op daemo
 	if !reply.OK {
 		return reply, errors.New(reply.Error)
 	}
-	if err := claimPostedThread(ctx, session, op, reply.Body); err != nil {
+	afterPost(ctx, origin{env: os.Environ()}, session, op, body, reply.Body)
+	return reply, nil
+}
+
+func afterPost(ctx context.Context, from origin, session string, op daemon.Op, body, posted json.RawMessage) {
+	if err := claimPostedThread(ctx, from, session, op, posted); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: posted, but %v\n", binaryName, err)
 	}
-	if err := mirrorPosted(ctx, session, op, body, reply.Body); err != nil {
+	if err := mirrorPosted(ctx, from, session, op, body, posted); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: posted, but the cc-present board was not told: %v\n", binaryName, err)
 	}
-	return reply, nil
 }
 
 type toolSpec struct {
@@ -449,7 +453,7 @@ func schemaLink(required ...string) map[string]any {
 	}
 }
 
-func (t toolSpec) tool(d cmd.Deps, session, scope string) channel.Tool {
+func (t toolSpec) tool(call caller, session string) channel.Tool {
 	schema := map[string]any{"type": "object", "properties": t.properties}
 	if len(t.required) > 0 {
 		schema["required"] = t.required
@@ -459,7 +463,7 @@ func (t toolSpec) tool(d cmd.Deps, session, scope string) channel.Tool {
 		Description: t.description,
 		InputSchema: schema,
 		Handler: func(ctx context.Context, args json.RawMessage, _ func(string)) (string, bool) {
-			reply, err := invoke(ctx, d, session, scope, t.op, args)
+			reply, err := call(ctx, t.op, args)
 			if err != nil {
 				if reply.Error != "" {
 					return reply.Error, true
@@ -505,20 +509,28 @@ func resolveSubjectPort(ctx context.Context, d cmd.Deps, session, scope, consume
 	}
 }
 
+type caller func(ctx context.Context, op daemon.Op, body json.RawMessage) (daemon.Reply, error)
+
 func channelTools(d cmd.Deps, session, scope string) ([]channel.Tool, string, string, error) {
-	tools := make([]channel.Tool, 0, len(toolSpecList)+1)
-	for _, t := range toolSpecList {
-		tools = append(tools, t.tool(d, session, scope))
+	call := func(ctx context.Context, op daemon.Op, body json.RawMessage) (daemon.Reply, error) {
+		return invoke(ctx, d, session, scope, op, body)
 	}
-	tools = append(tools, reconnectAwait(agentAwait(d, session, scope)))
-	return tools, notifyMethod, channelInstructions(session), nil
+	return sessionTools(call, session), notifyMethod, channelInstructions(session), nil
 }
 
-func agentAwait(d cmd.Deps, session, scope string) channel.Tool {
+func sessionTools(call caller, session string) []channel.Tool {
+	tools := make([]channel.Tool, 0, len(toolSpecList)+1)
+	for _, t := range toolSpecList {
+		tools = append(tools, t.tool(call, session))
+	}
+	return append(tools, reconnectAwait(agentAwait(call)))
+}
+
+func agentAwait(call caller) channel.Tool {
 	forAgent := func(agentID string) channel.Tool {
 		return channel.NewAwaitTool(channel.AwaitSpec{
 			Resolve: func(ctx context.Context) (string, int, error) {
-				return resolveAgentSubjectPort(ctx, d, session, scope, agentID)
+				return resolveAgentSubjectPort(ctx, call, agentID)
 			},
 			Timeout: awaitTimeout,
 		})
@@ -536,12 +548,12 @@ func agentAwait(d cmd.Deps, session, scope string) channel.Tool {
 	return t
 }
 
-func resolveAgentSubjectPort(ctx context.Context, d cmd.Deps, session, scope, agentID string) (string, int, error) {
+func resolveAgentSubjectPort(ctx context.Context, call caller, agentID string) (string, int, error) {
 	body, err := json.Marshal(map[string]string{"owner": agentID})
 	if err != nil {
 		return "", 0, err
 	}
-	reply, err := invoke(ctx, d, session, scope, opAgentSubject, body)
+	reply, err := call(ctx, opAgentSubject, body)
 	if err != nil {
 		return "", 0, err
 	}

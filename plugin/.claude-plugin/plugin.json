@@ -30,13 +30,9 @@
       }
     },
     "cc-slack": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/cc-slack",
-      "args": [
-        "tools"
-      ],
-      "env": {
-        "CLAUDE_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}"
-      }
+      "type": "http",
+      "url": "http://127.0.0.1:7378/mcp",
+      "headersHelper": "sh \"$CLAUDE_PLUGIN_ROOT/scripts/tools-headers.sh\""
     }
   },
   "channels": [

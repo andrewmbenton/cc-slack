@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"slices"
 	"time"
@@ -24,7 +23,7 @@ type postedThread struct {
 	ThreadTS  string `json:"thread_ts"`
 }
 
-func claimPostedThread(ctx context.Context, session string, op daemon.Op, body json.RawMessage) error {
+func claimPostedThread(ctx context.Context, from origin, session string, op daemon.Op, body json.RawMessage) error {
 	if session == "" || !slices.Contains(threadPostOps, op) {
 		return nil
 	}
@@ -40,7 +39,7 @@ func claimPostedThread(ctx context.Context, session string, op daemon.Op, body j
 	ctx, cancel := context.WithTimeout(ctx, cciClaimTimeout)
 	defer cancel()
 	c := exec.CommandContext(ctx, bin, "claim", "--thread", thread, "--rel", "posted") //nolint:gosec // G204: argv to the cci binary on PATH, never a shell
-	c.Env = append(os.Environ(), "CLAUDE_CODE_SESSION_ID="+session)
+	c.Env, c.Dir = append(slices.Clip(from.env), "CLAUDE_CODE_SESSION_ID="+session), from.dir
 	c.WaitDelay = time.Second
 	if out, err := c.CombinedOutput(); err != nil {
 		return fmt.Errorf("cci claim --thread %s: %w: %s", thread, err, clip(string(out)))

@@ -49,7 +49,7 @@ type boardDecision struct {
 	Permalink string    `json:"permalink"`
 }
 
-func presentSync(ctx context.Context, session, event string, payload any) error {
+func presentSync(ctx context.Context, from origin, session, event string, payload any) error {
 	bin, err := exec.LookPath(presentBinary)
 	if errors.Is(err, exec.ErrNotFound) {
 		return nil
@@ -59,14 +59,14 @@ func presentSync(ctx context.Context, session, event string, payload any) error 
 	}
 	c := exec.CommandContext(ctx, bin, "slack-sync", event, "--session", session) //nolint:gosec // G204: argv to the cc-present binary on PATH, never a shell
 	c.Stdin = bytes.NewReader(mustJSON(payload))
-	c.Env = append(os.Environ(), "CLAUDE_CODE_SESSION_ID="+session)
+	c.Env, c.Dir = append(slices.Clip(from.env), "CLAUDE_CODE_SESSION_ID="+session), from.dir
 	if out, err := c.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s slack-sync %s: %w: %s", presentBinary, event, err, clip(string(out)))
 	}
 	return nil
 }
 
-func mirrorPosted(ctx context.Context, session string, op daemon.Op, body, reply json.RawMessage) error {
+func mirrorPosted(ctx context.Context, from origin, session string, op daemon.Op, body, reply json.RawMessage) error {
 	if session == "" || op != opDMStatus {
 		return nil
 	}
@@ -95,7 +95,7 @@ func mirrorPosted(ctx context.Context, session string, op daemon.Op, body, reply
 			card.PRs = append(card.PRs, boardPR{Repo: id.Owner + "/" + id.Repo, Number: id.Number})
 		}
 	}
-	return presentSync(ctx, session, "posted", card)
+	return presentSync(ctx, from, session, "posted", card)
 }
 
 func watchSessions(ctx context.Context, db *sql.DB, watches []watch) ([]string, error) {
@@ -118,7 +118,7 @@ func (p *poller) forwardAnswer(ctx context.Context, db *sql.DB, watches []watch,
 		p.log.Printf("waiting ask %s: the board was not told: %v", ans.Waits, err)
 	}
 	for _, session := range sessions {
-		if err := presentSync(ctx, session, "answered", ans); err != nil {
+		if err := presentSync(ctx, origin{env: os.Environ()}, session, "answered", ans); err != nil {
 			p.log.Printf("waiting ask %s: the board was not told: %v", ans.Waits, err)
 		}
 	}
@@ -137,7 +137,7 @@ func (p *poller) decideOnBoard(ctx context.Context, db *sql.DB, watches []watch,
 	}
 	var errs []error
 	for _, session := range sessions {
-		err := presentSync(ctx, session, "decided", d)
+		err := presentSync(ctx, origin{env: os.Environ()}, session, "decided", d)
 		if err == nil {
 			return nil
 		}

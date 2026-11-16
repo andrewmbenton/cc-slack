@@ -190,6 +190,7 @@ func (a *app) buildServer() (*daemon.Server, error) {
 			s.Background(a.poller.run)
 			s.Background(a.socket.run)
 			s.Background(a.cards.run)
+			s.Background(func(ctx context.Context) { serveTools(ctx, s) })
 			return nil
 		},
 		AgentGreeting: agentGreeting,
