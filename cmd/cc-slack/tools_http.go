@@ -168,6 +168,7 @@ func ticketed(body []byte, logger *log.Logger) ([]byte, error) {
 		return nil, err
 	}
 	var params struct {
+		Name      string                     `json:"name"`
 		Arguments map[string]json.RawMessage `json:"arguments"`
 		Meta      map[string]json.RawMessage `json:"_meta"`
 	}
@@ -183,7 +184,7 @@ func ticketed(body []byte, logger *log.Logger) ([]byte, error) {
 	metaSeen.Do(func() {
 		logger.Printf("tools/call _meta keys %v, %s %q", slices.Sorted(maps.Keys(params.Meta)), toolUseMeta, use)
 	})
-	if use == "" || strings.ContainsAny(use, "/\\") {
+	if use == "" || strings.ContainsAny(use, "/\\") || params.Name == "slack_revoke" {
 		return body, nil
 	}
 	dir, err := ticketsDir()
@@ -192,28 +193,35 @@ func ticketed(body []byte, logger *log.Logger) ([]byte, error) {
 	}
 	path := filepath.Join(dir, use+".json")
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: the name is a tool use id with no path separator, under cc-slack's own state.
-	if errors.Is(err, os.ErrNotExist) {
-		return body, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	_ = os.Remove(path)
-	if _, ok := params.Arguments["ticket_id"]; ok {
-		return body, nil
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, fmt.Errorf("ticket file %s: %w", path, err)
-	}
-	var whole map[string]json.RawMessage
-	if err := json.Unmarshal(req["params"], &whole); err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	if params.Arguments == nil {
 		params.Arguments = map[string]json.RawMessage{}
 	}
-	maps.Copy(params.Arguments, fields)
+	delete(params.Arguments, "ticket_unhooked")
+	_, typed := params.Arguments["ticket_id"]
+	switch {
+	case err == nil:
+		_ = os.Remove(path)
+		for name := range params.Arguments {
+			if strings.HasPrefix(name, "ticket_") {
+				delete(params.Arguments, name)
+			}
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, fmt.Errorf("ticket file %s: %w", path, err)
+		}
+		delete(fields, "session")
+		maps.Copy(params.Arguments, fields)
+	case !typed:
+		params.Arguments["ticket_unhooked"] = json.RawMessage("true")
+	}
+	var whole map[string]json.RawMessage
+	if err := json.Unmarshal(req["params"], &whole); err != nil {
+		return nil, err
+	}
 	if whole["arguments"], err = json.Marshal(params.Arguments); err != nil {
 		return nil, err
 	}

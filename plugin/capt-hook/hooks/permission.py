@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -43,6 +44,8 @@ SHOWN = 300
 LATEST_SHOWN = 3
 SHORTCUT_BRIEF = "[cc-slack shortcut brief]"
 CHECK_SECONDS = 8
+KEPT_SECONDS = 600
+FILED_TOOLS = {DRIVE_SAY}
 DEADLINE_MARGIN = 5
 DRIVE_WRITE = "a drive session's Slack write, which the drive checks itself"
 CHECK_FAILURES = (OSError, LookupError, ValueError, RuntimeError, TypeError, AttributeError, subprocess.SubprocessError, sqlite3.Error)
@@ -858,7 +861,7 @@ def named_ticket(evt: PreToolUseEvent, ctx: Context, ticket: Ticket) -> HookResu
     fields = {"ticket_id": ticket.id, "ticket_tree": ticket.tree, "ticket_agent": ctx.agent, "ticket_call": ctx.call, "ticket_fingerprint": ctx.action.fingerprint}
     if evt.tool_name != "Bash":
         kept_ticket(evt, fields)
-        return evt.rewrite(dict(evt.input.raw) | fields)
+        return evt.allow() if evt.tool_name in FILED_TOOLS else evt.rewrite(dict(evt.input.raw) | fields)
     call = cli_calls(evt)[0][0]
     head, _, tail = evt.input.raw["command"].partition(call.command.raw)
     flags = " ".join(f"--{TICKET_FLAGS[name]} {shlex.quote(value)}" for name, value in fields.items())
@@ -875,7 +878,11 @@ def kept_ticket(evt: PreToolUseEvent, fields: dict[str, str]) -> None:
     folder = tickets_dir()
     folder.mkdir(parents=True, exist_ok=True)
     written = folder / f".{use}.tmp"
-    written.write_text(json.dumps(fields))
+    for stale in folder.glob("*.json"):
+        with contextlib.suppress(FileNotFoundError):
+            if time.time() - stale.stat().st_mtime > KEPT_SECONDS:
+                stale.unlink()
+    written.write_text(json.dumps(fields | {"session": evt._raw.get("session_id") or ""}))
     written.replace(folder / f"{use}.json")
 
 
@@ -1422,9 +1429,9 @@ on(
             case(**said(f"respond to this asap {DANA_URL}")) >> ALLOW,
             case(**said(f"respond to this asap {DANA_URL}.", "status?", "and the release?")) >> ALLOW,
             case(**said(f"respond to this asap {DANA_URL}", agent_id="a-lane")) >> Rewrite(ticket_agent="a-lane"),
-            case(tool=DRIVE_SAY, **said(f"respond to this asap {DANA_URL}")) >> ALLOW,
+            case(tool=DRIVE_SAY, **said(f"respond to this asap {DANA_URL}")) >> Allow(),
             case(tool=DRIVE_SAY, transcript=LINKED_LONG_AGO_BY_OTHERS) >> DENY,
-            case(PRIYA_FIXED, tool=DRIVE_SAY, **said(PRIYA_REPORTED), commands=PRIYA_GROUP_DM) >> ALLOW,
+            case(PRIYA_FIXED, tool=DRIVE_SAY, **said(PRIYA_REPORTED), commands=PRIYA_GROUP_DM) >> Allow(),
             case(PRIYA_FIXED, tool=DRIVE_SAY, **said(PRIYA_REPORTED), commands=PRIYA_GROUP_DM | {f"{CC_SLACK} dm-peer --channel {HIS_DM_WITH_PRIYA}": SAM_DM[f"{CC_SLACK} dm-peer"]}) >> DENY,
             case(DIGEST, tool="slack_send", transcript=LANE_BRIEF, root_transcript=owner_answered(DIGEST_ASKED, DIGEST_OPTIONS, DIGEST_OPTIONS[0], id="digest")) >> ALLOW,
             case(DIGEST, tool="slack_send", transcript=LANE_BRIEF, root_transcript=owner_answered(DIGEST_ASKED, DIGEST_OPTIONS, DIGEST_OPTIONS[1], id="digest")) >> DENY,
@@ -1599,7 +1606,7 @@ on(
             case({"channel_id": OWN_DM_EDIT["channel_id"], "ts": BOT_ANSWERED["ts"]}, tool="slack_delete", commands=OWN_DM | thread_read(BOT_ANSWERED)) >> ALLOW,
             case(OWN_DM_EDIT, tool="slack_edit", commands=OWN_DM | thread_read(BOT_ANSWERED | {"from_claude": False, "from_bot": True})) >> Allow(explicit=True),
             case(OWN_DM_EDIT, tool="slack_edit", commands=PRIYA_DM | thread_read(BOT_ANSWERED)) >> Block(pattern="Edit the bot's message to this"),
-            case({"edit": SAY_EDIT_URL, "text": "fix is out, edited"}, tool=DRIVE_SAY, tickets=[posted_once()], commands=NOT_DM | thread_read(DANA_OPENED, BOT_ANSWERED | {"thread_ts": DANA_THREAD})) >> ALLOW,
+            case({"edit": SAY_EDIT_URL, "text": "fix is out, edited"}, tool=DRIVE_SAY, tickets=[posted_once()], commands=NOT_DM | thread_read(DANA_OPENED, BOT_ANSWERED | {"thread_ts": DANA_THREAD})) >> Allow(),
             case({"edit": SAY_EDIT_URL, "text": "edited"}, tool=DRIVE_SAY, commands=NOT_DM | thread_read(DANA_OPENED, BOT_ANSWERED | {"thread_ts": DANA_THREAD})) >> Block(pattern="Edit the bot's message to this"),
             case({"edit": f"https://acme.slack.com/archives/{OWN_DM_EDIT['channel_id']}/p{BOT_ANSWERED['ts'].replace('.', '')}", "text": OWN_DM_EDIT["text"]}, tool=DRIVE_SAY, commands=OWN_DM | thread_read(BOT_ANSWERED)) >> Allow(explicit=True),
             case({"edit": f"https://acme.slack.com/archives/{OWN_DM_EDIT['channel_id']}/p{BOT_ANSWERED['ts'].replace('.', '')}?thread_ts={DANA_THREAD}&cid={OWN_DM_EDIT['channel_id']}", "text": OWN_DM_EDIT["text"]}, tool=DRIVE_SAY, commands=OWN_DM | {f"{CC_SLACK} thread --json": (1, "ratelimited")}) >> Allow(explicit=True),
@@ -1659,15 +1666,15 @@ on(
             case(LANDED, tool="slack_send", **said("status?"), commands=ruled(EVERY_THREAD_GRANT)) >> DENY,
             case(DANA | {"thread_ts": "1791866612.381629", "text": "fix is out"}, tool="slack_reply", **said("status?"), commands=ruled(THREAD_GRANT) | thread_read(DANA_OPENED)) >> DENY,
             case(LANDED, tool="slack_send", **said("status?"), commands=ruled(THREAD_GRANT)) >> DENY,
-            case(ROLLOUT_LINE, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> ALLOW,
-            case(CLONE_CARD, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> ALLOW,
-            case(ROLLOUT_LINE | {"text": "The rollout is live: https://acme.slack.com/archives/C0ALERTS001/p1794514810641409?thread_ts=1794512248.483749"}, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> ALLOW,
+            case(ROLLOUT_LINE, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> Allow(),
+            case(CLONE_CARD, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> Allow(),
+            case(ROLLOUT_LINE | {"text": "The rollout is live: https://acme.slack.com/archives/C0ALERTS001/p1794514810641409?thread_ts=1794512248.483749"}, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> Allow(),
             case(ROLLOUT_LINE | {"text": "Could you confirm the search release is live for you?"}, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> DENY,
             case(ROLLOUT_LINE | {"text": "The rollout is live, <https://acme.slack.com/archives/C0ALERTS001/p1794514810641409|please retry your search>."}, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> DENY,
             case(ROLLOUT_LINE | {"blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "Does search work for you now?"}}]}, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> DENY,
             case(ROLLOUT_LINE | {"channel_id": PETS}, tool=DRIVE_SAY, **said(ROLLOUT_BRIEF), commands=ALERT_THREADS) >> DENY,
-            case(WARNING, tool=DRIVE_SAY, transcript=relayed(CITING_RECORD), commands=grant_shown(), decide=CITED_PERMITS) >> ALLOW,
-            case(WARNING, tool=DRIVE_SAY, **said("Handler: post the warning in the release's thread under grant=7a3c2f1"), commands=grant_shown(), decide=CITED_PERMITS) >> ALLOW,
+            case(WARNING, tool=DRIVE_SAY, transcript=relayed(CITING_RECORD), commands=grant_shown(), decide=CITED_PERMITS) >> Allow(),
+            case(WARNING, tool=DRIVE_SAY, **said("Handler: post the warning in the release's thread under grant=7a3c2f1"), commands=grant_shown(), decide=CITED_PERMITS) >> Allow(),
             case(WARNING, tool=DRIVE_SAY, transcript=relayed(CITING_RECORD.replace("grant=", "answer=")), commands=grant_shown(), decide=CITED_PERMITS) >> DENY,
             case(WARNING, tool=DRIVE_SAY, transcript=relayed(CITING_RECORD), commands=grant_shown(INCIDENT_GRANT | {"tags": ["scope:durable"]}), decide=CITED_PERMITS) >> DENY,
             case(WARNING, tool=DRIVE_SAY, transcript=relayed(CITING_RECORD), commands=grant_shown(INCIDENT_GRANT | {"superseded_by": ["0a0a0a0a0a0a0a0a"]}), decide=CITED_PERMITS) >> DENY,
@@ -1702,8 +1709,8 @@ on(
             case(transcript=relayed(CLAIMED), env=LEDGER_ENV, session_id="ledger-session", llm={"reason": "the record quotes a grant", "allow": True, "relied_on": [said_evidence("post the fix in every thread you like", PROMPTED_AT, "prompt").id]}) >> DENY,
             case(transcript=relayed(UNLEDGERED), env=DRIVE_ENV_SET) >> ALLOW,
             case(transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=UNREADABLE) >> ALLOW,
-            case(tool=DRIVE_SAY, transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=UNREADABLE) >> ALLOW,
-            case(tool=DRIVE_SAY, transcript=LINKED_LONG_AGO_BY_OTHERS, env=LANE_ENV_SET, commands=UNREADABLE) >> ALLOW,
+            case(tool=DRIVE_SAY, transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=UNREADABLE) >> Allow(),
+            case(tool=DRIVE_SAY, transcript=LINKED_LONG_AGO_BY_OTHERS, env=LANE_ENV_SET, commands=UNREADABLE) >> Allow(),
             case({"channel_id": SAM_USER, "text": "Hi Sam, the fix is live."}, tool="slack_send", transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=SAM_DM) >> ALLOW,
             case(DANA | {"text": f"_(Alex's Claude)_ {DANA_TEXT}"}, tool="mcp__claude_ai_Slack__slack_send_message", transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=UNREADABLE) >> Allow(explicit=True),
             case(transcript=LINKED_LONG_AGO_BY_OTHERS, env=DRIVE_ENV_SET, commands=NOT_DM | {f"{CC_SLACK} dm-peer": (1, "unreachable")}) >> ALLOW,
@@ -1717,10 +1724,10 @@ on(
             case(**briefed(), commands=owner_dm(own=False), decide=jev(ORDER_ID)) >> DENY,
             case(**briefed(), commands=owner_dm(from_user=False), decide=jev(ORDER_ID)) >> DENY,
             case(**briefed(STALE_TS), commands=owner_dm(ts=STALE_TS), decide=jev(f"operator:{OWNER_DM}/{STALE_TS}")) >> Rewrite(ticket_agent="a-lane"),
-            case(SAM_TOLD, tool=DRIVE_SAY, **said(CARD_BRIEF), commands=card_answered(), decide=jev(CARD_ID)) >> ALLOW,
+            case(SAM_TOLD, tool=DRIVE_SAY, **said(CARD_BRIEF), commands=card_answered(), decide=jev(CARD_ID)) >> Allow(),
             case(SAM_TOLD, tool=DRIVE_SAY, **said(CARD_BRIEF), commands=card_answered(""), decide=jev(CARD_ID)) >> DENY,
             case(SAM_TOLD, tool=DRIVE_SAY, **said(CARD_BRIEF), commands=card_answered(own=False), decide=jev(CARD_ID)) >> DENY,
-            case(SAM_TOLD | {"asked": [CARD_URL]}, tool=DRIVE_SAY, **said("status?"), commands=card_answered(), decide=jev(CARD_ID)) >> ALLOW,
+            case(SAM_TOLD | {"asked": [CARD_URL]}, tool=DRIVE_SAY, **said("status?"), commands=card_answered(), decide=jev(CARD_ID)) >> Allow(),
             case(SAM_TOLD, tool=DRIVE_SAY, **said("status?"), commands=card_answered(), decide=jev(CARD_ID)) >> DENY,
             case(transcript=dm_arrived(), tickets=[posted_once(evidence=(ORDER,))], decide=jev(ORDER_ID)) >> ALLOW,
             case(SHIPPED, transcript=[T.user("status?")], root_transcript=dm_arrived(), agent_id="a-lane", tickets=[posted_once(evidence=(ORDER,))], commands=ruled(SOLVED_GRANT) | thread_read(DANA_OPENED, BOT_ANSWERED), decide=jev(ORDER_ID)) >> Rewrite(ticket_agent="a-lane"),

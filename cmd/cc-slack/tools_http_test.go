@@ -60,7 +60,7 @@ func TestAToolCallTakesTheTicketItsHookKeptByToolUseIDOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	kept := filepath.Join(dir, "toolu_1.json")
-	if err := os.WriteFile(kept, []byte(`{"ticket_id":"abc123","ticket_tree":"root"}`), 0o600); err != nil {
+	if err := os.WriteFile(kept, []byte(`{"ticket_id":"abc123","ticket_tree":"root","session":"s-1"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	logger := log.New(io.Discard, "", 0)
@@ -84,7 +84,7 @@ func TestAToolCallTakesTheTicketItsHookKeptByToolUseIDOnce(t *testing.T) {
 		t.Fatalf("ticket file still there: %v", err)
 	}
 	again, err := ticketed([]byte(call), logger)
-	if err != nil || string(again) != call {
-		t.Fatalf("second call = %s, %v; want it unchanged with no file left", again, err)
+	if err != nil || !strings.Contains(string(again), `"ticket_unhooked":true`) {
+		t.Fatalf("second call = %s, %v; want it marked unhooked with no file left", again, err)
 	}
 }

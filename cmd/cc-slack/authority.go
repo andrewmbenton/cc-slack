@@ -33,6 +33,8 @@ const (
 	reachOnce      = "once"
 )
 
+const keptTicketAge = 2 * time.Minute
+
 var maybeApplied = []string{"fatal_error", "internal_error", "request_timeout", "service_unavailable"}
 
 type ticketSpend struct {
@@ -41,6 +43,7 @@ type ticketSpend struct {
 	Agent       string `json:"ticket_agent"`
 	Call        string `json:"ticket_call"`
 	Fingerprint string `json:"ticket_fingerprint"`
+	Unhooked    bool   `json:"ticket_unhooked"`
 }
 
 type write struct {
@@ -169,6 +172,14 @@ func (a *app) ticketPlace(ctx context.Context, api slackAPI, id identity, w writ
 
 func (a *app) spendTicket(ctx context.Context, api slackAPI, id identity, session string, s ticketSpend, w write) (hookTicket, error) {
 	if s.TicketID == "" {
+		for _, kept := range keptTickets(session) {
+			if t, err := a.spendTicket(ctx, api, id, session, kept.spend, w); err == nil {
+				_ = os.Remove(kept.path)
+				return t, nil
+			}
+		}
+	}
+	if s.TicketID == "" {
 		return hookTicket{}, fmt.Errorf("no ticket covers this %s: the permission hook names one on every write it lets through, so it never finished checking this call. "+
 			"When it timed out before naming a ticket, retry the same call; a cc-slack call inside a script, a function or a pipe the hook cannot read gets no ticket, so run it as its own Bash command or through its slack_* tool", w.action)
 	}
@@ -195,9 +206,55 @@ func (a *app) spendTicket(ctx context.Context, api slackAPI, id identity, sessio
 	return spent.Ticket, nil
 }
 
+type keptTicket struct {
+	path  string
+	spend ticketSpend
+}
+
+func keptTickets(session string) []keptTicket {
+	dir, err := ticketsDir()
+	if session == "" || err != nil {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	type dated struct {
+		keptTicket
+		at time.Time
+	}
+	var found []dated
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || !strings.HasSuffix(entry.Name(), ".json") || time.Since(info.ModTime()) > keptTicketAge {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		raw, err := os.ReadFile(path) //nolint:gosec // G304: a file in cc-slack's own ticket folder.
+		if err != nil {
+			continue
+		}
+		var kept struct {
+			ticketSpend
+			Session string `json:"session"`
+		}
+		if json.Unmarshal(raw, &kept) != nil || kept.Session != session || kept.TicketID == "" {
+			continue
+		}
+		found = append(found, dated{keptTicket{path, kept.ticketSpend}, info.ModTime()})
+	}
+	slices.SortFunc(found, func(x, y dated) int { return y.at.Compare(x.at) })
+	out := make([]keptTicket, len(found))
+	for i, kept := range found {
+		out[i] = kept.keptTicket
+	}
+	return out
+}
+
 func (a *app) authorize(hc daemon.HandlerCtx, api slackAPI, id identity, s ticketSpend, w write) (hookTicket, *receipt, error) {
 	ctx, db := hc.Ctx, hc.DB
-	if w.editsInOperatorChannel(id) || s.TicketID == "" && !a.mintsTickets(ctx, hc.Env.ClaudePID) {
+	if w.editsInOperatorChannel(id) || s.TicketID == "" && (s.Unhooked || !a.mintsTickets(ctx, hc.Env.ClaudePID)) {
 		return hookTicket{}, nil, nil
 	}
 	t, err := a.spendTicket(ctx, api, id, hc.Env.Session, s, w)

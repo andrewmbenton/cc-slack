@@ -574,3 +574,31 @@ func TestADetachedDriveVerbRunsUnderNoClaudeSession(t *testing.T) {
 		t.Fatalf("claudePID() = %d under LONG_RUNNING_DETACHED, want 0", pid)
 	}
 }
+
+func TestKeptTicketsAreASessionsOwnNewestFirst(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir, err := ticketsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i, kept := range []string{`{"ticket_id":"old","session":"s-1"}`, `{"ticket_id":"new","session":"s-1"}`, `{"ticket_id":"theirs","session":"s-2"}`} {
+		path := fmt.Sprintf("%s/toolu_%d.json", dir, i)
+		if err := os.WriteFile(path, []byte(kept), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().Add(time.Duration(i-3) * time.Second)
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := keptTickets("s-1")
+	if len(got) != 2 || got[0].spend.TicketID != "new" || got[1].spend.TicketID != "old" {
+		t.Fatalf("keptTickets(s-1) = %+v, want new then old", got)
+	}
+	if keptTickets("") != nil {
+		t.Fatal("a write with no session takes no kept ticket")
+	}
+}
