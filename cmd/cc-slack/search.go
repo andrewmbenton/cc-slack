@@ -36,7 +36,7 @@ func (a *app) searchMessages(hc daemon.HandlerCtx, b opBody) daemon.Reply {
 	ctx, cancel := context.WithTimeout(hc.Ctx, historyBudget)
 	defer cancel()
 	found, err := user.SearchMessagesContext(ctx, query, params)
-	if errorCode(err) == "missing_scope" {
+	if err != nil && errorCode(err) == "missing_scope" {
 		return fail(fmt.Sprintf("searching Slack as you needs your consent to search: %v", a.consentAgain(hc.Ctx, id)))
 	}
 	if err != nil {
