@@ -24,6 +24,11 @@ ALERT_LINE = re.compile(r"\s*<?https://(?:[\w-]+\.sentry\.io/issues/|sentry\.io/
 UNLABELED_LINK = re.compile(r"<((?:https?://|mailto:)[^<>|\s]+)(?:\|\s*\1\s*)?>")
 BARE_URL_FIX = "wrap it as <url|short label>, words saying what it opens; Slack draws a Slack message under words that name it, and only an alert's own Sentry issue or Datadog monitor, incident, or event link stays bare, alone on its own line, so Slack unfurls it"
 ONE_PARAGRAPH_WORDS = 60
+RELEASE_BUILD = re.compile(r"https://buildkite\.com/[\w-]+/release/builds/\d+")
+RELEASE_BUILD_FIX = "link the release's own post in #releases, which the reader reads, never its Buildkite build"
+CARD_ASK = re.compile(r"(?i)\b(?:on|in|tap|from|under)\s+(?:the|your|its|this|that)\s+card\b")
+SLACK_MESSAGE = re.compile(r"https://[\w-]+\.slack\.com/archives/[A-Z0-9]+/p\d+")
+CARD_ASK_FIX = "a line asking the reader to act on a card links that card, so it draws right under the post; never leave the reader to find it"
 
 
 def his_word(token: str, asked: Sequence[str]) -> bool:
@@ -240,7 +245,7 @@ def plain(line: str, labels: bool = False) -> str:
 
 
 def check(text: str, asked: Sequence[str] = ()) -> list[Finding]:
-    findings = nested_links(text) + unlabeled_links(text) + one_paragraph(text)
+    findings = nested_links(text) + unlabeled_links(text) + one_paragraph(text) + release_builds(text) + unlinked_cards(text)
     for number, (line, fenced) in enumerate(fenced_lines(text), start=1):
         masked = {labels: plain(line, labels) for labels in (False, True)}
         for rule in RULES:
@@ -270,6 +275,23 @@ def unlabeled_links(text: str) -> list[Finding]:
         for number, (line, fenced) in enumerate(fenced_lines(text), start=1)
         if not (fenced or ALERT_LINE.fullmatch(line))
         for match in UNLABELED_LINK.finditer(mask_code(line))
+    ]
+
+
+def release_builds(text: str) -> list[Finding]:
+    return [
+        Finding(number, match.start() + 1, "release-build", match[0], RELEASE_BUILD_FIX)
+        for number, (line, fenced) in enumerate(fenced_lines(text), start=1)
+        if not fenced
+        for match in RELEASE_BUILD.finditer(mask_code(line))
+    ]
+
+
+def unlinked_cards(text: str) -> list[Finding]:
+    return [
+        Finding(number, match.start() + 1, "card-unlinked", match[0], CARD_ASK_FIX)
+        for number, (line, fenced) in enumerate(fenced_lines(text), start=1)
+        if not fenced and not SLACK_MESSAGE.search(line) and (match := CARD_ASK.search(mask_quotes(mask_code(line))))
     ]
 
 

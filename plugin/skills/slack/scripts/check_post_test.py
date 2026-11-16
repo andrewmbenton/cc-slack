@@ -297,6 +297,17 @@ class CheckPostTest(unittest.TestCase):
         text = "The image builder failed, and the RSS readers on staging timed out."
         self.assertEqual(kinds(text), [])
 
+    def test_flags_a_release_linked_to_its_buildkite_build_and_a_card_ask_linking_no_card(self) -> None:
+        text = (
+            "<https://buildkite.com/acme/release/builds/17624|the dev cut build> is live.\n"
+            "Pick an option on the card.\n"
+            "Pick an option on <https://acme.slack.com/archives/C0A1/p1794825458958309|the card on the switch wait>."
+        )
+        self.assertEqual(
+            kinds(text),
+            [("release-build", "https://buildkite.com/acme/release/builds/17624"), ("card-unlinked", "on the card")],
+        )
+
     def test_flags_a_long_post_on_one_line(self) -> None:
         line = " ".join(["word"] * 61) + "."
         self.assertEqual(kinds(line), [("one-paragraph", "word word word word word word")])

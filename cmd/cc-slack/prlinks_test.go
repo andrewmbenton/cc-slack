@@ -2213,7 +2213,7 @@ func TestACardAtTheDMRootCarriesEachPRCardInItselfOnce(t *testing.T) {
 	}
 	carriedOf := func(card fakePost) []*slack.ButtonBlockElement {
 		return slices.DeleteFunc(copiedButtonsOf(t, notice()), func(b *slack.ButtonBlockElement) bool {
-			return !strings.HasPrefix(b.ActionID, cardCopyAction+card.ts+":")
+			return !strings.HasPrefix(b.ActionID, cardCopyAction+testDM+"/"+card.ts+":")
 		})
 	}
 	if buttons := carriedOf(card41); len(buttons) != 1 || buttons[0].Text.Text != "Merge (Recommended)" || strings.Contains(sent["warning"], "NO APPROVE") {

@@ -33,7 +33,7 @@ func (l *liveCards) linkDrawIn(channel, thread, at, text string, blocks []slack.
 		}
 		plain = true
 	}
-	d.inline = len(d.cards) > 0 && (!plain || unfurled)
+	d.inline = len(d.cards) > 0 && (!plain || unfurled) && !slices.ContainsFunc(d.cards, func(card cardRef) bool { return card.channel != channel })
 	if d.inline {
 		d.post = strconv.FormatInt(time.Now().UnixNano()+freshPosts.Add(1), 36)
 	}

@@ -756,7 +756,20 @@ func (a *app) linkCardInto(ctx context.Context, db *sql.DB, id identity, thread 
 }
 
 func (a *app) postCardLink(ctx context.Context, db *sql.DB, id identity, channel, under, post string, card cardRef) error {
-	res, err := a.post(atStep(ctx, "link:"+card.ts+":"+under), db, id, channel, under, linkedPage{text: slackLink(id.permalink(card.channel, card.ts, card.thread), a.cards.titleOf(card.channel, card.ts))}, nil, false)
+	link := id.permalink(card.channel, card.ts, card.thread)
+	page := linkedPage{text: slackLink(link, a.cards.titleOf(card.channel, card.ts))}
+	if card.channel != channel {
+		ref, err := parsePermalink(link)
+		if err != nil {
+			return err
+		}
+		blocks, answers, err := copyBlocks(ctx, a.newAPI(id.Token), ref, link)
+		if err != nil {
+			return err
+		}
+		page = linkedPage{text: copyLead(blocks, answers), blocks: blocks}
+	}
+	res, err := a.post(atStep(ctx, "link:"+card.ts+":"+under), db, id, channel, under, page, nil, false)
 	if err != nil {
 		return err
 	}
@@ -864,7 +877,10 @@ func sectionText(blocks []slack.Block) string {
 }
 
 func approvesOn(blocks []slack.Block, card string) bool {
-	answersCard := func(b *slack.ButtonBlockElement) bool { return strings.HasPrefix(b.ActionID, cardCopyAction+card+":") }
+	answersCard := func(b *slack.ButtonBlockElement) bool {
+		copied, found := strings.CutPrefix(b.ActionID, cardCopyAction)
+		return found && (strings.HasPrefix(copied, card+":") || strings.Contains(copied, "/"+card+":"))
+	}
 	return slices.ContainsFunc(blocks, func(block slack.Block) bool {
 		switch b := block.(type) {
 		case *slack.ActionBlock:

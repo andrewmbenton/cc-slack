@@ -59,9 +59,9 @@ func sameCard(was, now statusCard) bool {
 	return bytes.Equal(mustJSON(was), mustJSON(now))
 }
 
-func copyBlocks(ctx context.Context, api slackAPI, id identity, ref permalinkRef, link string) ([]slack.Block, int, error) {
-	if ref.channelID != id.DMChannelID || ref.ts == "" {
-		return nil, 0, fmt.Errorf("%s is not a message in your DM with the app", link)
+func copyBlocks(ctx context.Context, api slackAPI, ref permalinkRef, link string) ([]slack.Block, int, error) {
+	if ref.ts == "" {
+		return nil, 0, fmt.Errorf("%s names no message", link)
 	}
 	card, err := messageAt(ctx, api, ref.channelID, ref.threadTS, ref.ts)
 	if err != nil {
@@ -169,7 +169,7 @@ func answers(actionID string) bool {
 
 func copiedAnswer(b *slack.ButtonBlockElement, ref permalinkRef) *slack.ButtonBlockElement {
 	answer := *b
-	answer.ActionID = cardCopyAction + ref.ts + ":" + b.ActionID
+	answer.ActionID = cardCopyAction + ref.channelID + "/" + ref.ts + ":" + b.ActionID
 	return &answer
 }
 
@@ -214,6 +214,9 @@ func (a cardActionPush) onCard() (cardActionPush, bool) {
 		return a, false
 	}
 	ts, rest, _ := strings.Cut(rest, ":")
+	if channel, at, cross := strings.Cut(ts, "/"); cross {
+		a.Channel, ts = channel, at
+	}
 	_, action, _ := strings.Cut(rest, cardActionPrefix)
 	a.MessageTS, a.ActionID = ts, cardActionPrefix+action
 	return a, true
@@ -245,7 +248,7 @@ func (l *liveCards) redrawCopies(ctx context.Context, id identity, card cardRef)
 		return err
 	}
 	api := l.newAPI(id.Token)
-	blocks, answers, err := copyBlocks(ctx, api, id, ref, link)
+	blocks, answers, err := copyBlocks(ctx, api, ref, link)
 	if err != nil {
 		return err
 	}

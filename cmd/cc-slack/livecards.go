@@ -613,7 +613,7 @@ func (l *liveCards) located(a cardActionPush) (cardActionPush, bool) {
 	card, copied := a.onCard()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	stored, found := l.storedCard(a.Channel, card.MessageTS)
+	stored, found := l.storedCard(card.Channel, card.MessageTS)
 	if !found && !copied {
 		stored, found = l.copySource(a.Channel, card.MessageTS)
 	}

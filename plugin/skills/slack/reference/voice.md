@@ -32,7 +32,9 @@ order.
    or ingress unless the reader used the word, zone
    labels such as `PT` or `17:35Z` outside a code span or block, a log's
    `09:15:42Z` time even in a code span, a post of more than 60 words on
-   one line with no break or heading, an option named by number or position
+   one line with no break or heading, a release linked to its Buildkite
+   release build instead of its post in #releases, a line asking the reader
+   to act on the card that links no card, an option named by number or position
    such as "same as 1" or "the first option", a greeting to a plain first name such as
    "Hi Andrew" where a mention belongs, an unbackticked `SNAKE_CASE`
    identifier, a paragraph past three sentences, a line outside a `>` quote
