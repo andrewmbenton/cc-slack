@@ -93,7 +93,7 @@ def seen(newest: str, *, delivered: bool, after: int = 0) -> dict[str, str]:
 
 def thread_seen(evt: ToolHookEvent, write: Write, since: str) -> dict[str, Any] | None:
     if not (session := evt._raw.get("session_id")):
-        return None
+        return {}
     argv = [str(BIN), "thread-seen", "--session", session, "--channel", write.channel, "--thread", write.thread, "--owner", evt.agent_id or "", "--since", since]
     try:
         out = capture(argv, timeout=SEEN_TIMEOUT)

@@ -10,6 +10,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -353,6 +354,33 @@ class PackTest(unittest.TestCase):
         command = f"cc-slack thread --channel {THREAD['channel_id']} --thread {THREAD['thread_ts']} --since-ts 1790210300.000001"
         self.read_guard.thread_reads_are_recorded(mock_tool_event(event=Event.PostToolUse, command=command, output=json.dumps({"messages": []}), session_dir=cli))
         self.assertFalse(self.refused(cli))
+
+    def test_a_session_a_drive_binds_is_a_drive_session(self) -> None:
+        permission = sys.modules[f"{self.package}.permission"]
+        state = Path(self.tmp.name) / "long-running"
+        (state / "legacy").mkdir(parents=True)
+        (state / "legacy" / "drive.json").write_text(json.dumps({"driver": {"session": "s-legacy"}}))
+        (state / "current").mkdir()
+        with closing(sqlite3.connect(state / "current" / "drive.db")) as db:
+            db.execute("CREATE TABLE rows (collection TEXT, key TEXT, body TEXT)")
+            db.executemany(
+                "INSERT INTO rows VALUES (?, ?, ?)",
+                [
+                    ("", "roles", json.dumps({"communicator": {"session": "s-root"}})),
+                    ("", "subcoordinators", json.dumps({"Platform": {"session": "s-sub"}})),
+                    ("handlers", "h1", json.dumps({"session": "s-handler"})),
+                    ("handlers", "h2", json.dumps({"session": None})),
+                ],
+            )
+            db.commit()
+        (state / "broken").mkdir()
+        (state / "broken" / "drive.json").write_text("not json")
+        (state / "stray.txt").write_text("")
+        with mock.patch.dict(os.environ, {"LONG_RUNNING_STATE": str(state)}):
+            self.assertEqual(
+                [permission.bound_to_drive(session) for session in ("s-legacy", "s-root", "s-sub", "s-handler", "s-other", "")],
+                [True, True, True, True, False, False],
+            )
 
 
 if __name__ == "__main__":

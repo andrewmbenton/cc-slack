@@ -48,8 +48,7 @@ DEADLINE_MARGIN = 5
 DRIVE_ENV = ("CLAUDE_LONG_RUNNING_DRIVE", "CLAUDE_LONG_RUNNING_LANE")
 DRIVE_WRITE = "a drive session's Slack write, which the drive checks itself"
 DRIVE_BINDINGS = "SELECT collection, key, body FROM rows WHERE collection = '' AND key IN ('driver', 'roles', 'subcoordinators') OR collection = 'handlers'"
-UNREAD_DRIVE = (OSError, sqlite3.Error, ValueError, LookupError, AttributeError)
-CHECK_FAILURES = (OSError, LookupError, ValueError, RuntimeError, TypeError, AttributeError, subprocess.SubprocessError)
+CHECK_FAILURES = (OSError, LookupError, ValueError, RuntimeError, TypeError, AttributeError, subprocess.SubprocessError, sqlite3.Error)
 UNFINISHED = "{gate}: the check did not finish ({cause}), so this write goes ahead unchecked"
 GRANT_LABEL = "slack-grant:"
 EVERY_THREAD = "/threads"
@@ -873,7 +872,7 @@ def bound_to_drive(session: str) -> bool:
         try:
             if session in drive_sessions(saved_drive(folder)):
                 return True
-        except UNREAD_DRIVE:
+        except CHECK_FAILURES:
             continue
     return False
 
