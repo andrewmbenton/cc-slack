@@ -305,7 +305,7 @@ func TestReplayAnswersBeforeAttachmentsAreChecked(t *testing.T) {
 	if err := json.Unmarshal(l.do(opSend, pending).Body, &later); err != nil {
 		t.Fatalf("retry once the attachment is back: %v", err)
 	}
-	if !later.Posted || later.Replayed || l.slack.callCount("chat.postMessage") != 2 {
+	if !later.Posted || later.Replayed || l.slack.callCount("files.completeUploadExternal") != 2 {
 		t.Fatalf("retry = %+v, want a refused attachment to leave its ticket usable for the same write", later)
 	}
 }
