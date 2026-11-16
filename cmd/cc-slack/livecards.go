@@ -319,6 +319,7 @@ type liveCards struct {
 	sweepFrom    string
 	sweepWrote   []time.Time
 	drawStats    drawStats
+	lastBody     map[string]string
 	tapping      atomic.Int32
 }
 
@@ -1573,7 +1574,8 @@ func (l *liveCards) flush(ctx context.Context, api slackAPI, t *liveThread, writ
 }
 
 func (l *liveCards) update(ctx context.Context, api slackAPI, channel string, w cardWrite) error {
-	drawn := drawnHash(w.text, w.blocks)
+	body := drawnBody(w.text, w.blocks)
+	drawn := bodyHash(body)
 	if w.m != nil && l.unchanged(w.m, drawn) {
 		return nil
 	}
@@ -1588,7 +1590,7 @@ func (l *liveCards) update(ctx context.Context, api slackAPI, channel string, w 
 		return err
 	}
 	if w.m != nil {
-		l.markDrawn(w.m, drawn)
+		l.markDrawn(w.m, drawn, body)
 	}
 	return nil
 }
@@ -2281,13 +2283,30 @@ func (l *liveCards) sweepWait() time.Duration {
 
 var signedQuery = regexp.MustCompile(`\?[^"\s]*X-Amz-Signature[^"\s]*`)
 
-func drawnHash(text string, blocks []slack.Block) string {
+func drawnBody(text string, blocks []slack.Block) string {
 	raw, err := json.Marshal(blocks)
 	if err != nil {
 		panic(fmt.Sprintf("encode card blocks: %v", err))
 	}
-	sum := sha256.Sum256(append([]byte(text+"\x00"), signedQuery.ReplaceAll(raw, nil)...))
+	return text + "\x00" + string(signedQuery.ReplaceAll(raw, nil))
+}
+
+func bodyHash(body string) string {
+	sum := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(sum[:])
+}
+
+func redrawDiff(before, after string) string {
+	start := 0
+	for start < len(before) && start < len(after) && before[start] == after[start] {
+		start++
+	}
+	end := 0
+	for end < len(before)-start && end < len(after)-start && before[len(before)-1-end] == after[len(after)-1-end] {
+		end++
+	}
+	from := max(start-40, 0)
+	return fmt.Sprintf("%q: %q -> %q", before[from:start], clipRunes(before[start:len(before)-end], 120), clipRunes(after[start:len(after)-end], 120))
 }
 
 func (l *liveCards) unchanged(m *liveMessage, drawn string) bool {
@@ -2300,9 +2319,16 @@ func (l *liveCards) unchanged(m *liveMessage, drawn string) bool {
 	return same
 }
 
-func (l *liveCards) markDrawn(m *liveMessage, drawn string) {
+func (l *liveCards) markDrawn(m *liveMessage, drawn, body string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if before, seen := l.lastBody[m.TS]; seen && before != body {
+		l.log.Printf("live card %s redrawn, changed %s", m.TS, redrawDiff(before, body))
+	}
+	if l.lastBody == nil {
+		l.lastBody = map[string]string{}
+	}
+	l.lastBody[m.TS] = body
 	m.DrawnHash = drawn
 	l.drawStats.written++
 	if now := l.now(); l.drawStats.since.IsZero() {
