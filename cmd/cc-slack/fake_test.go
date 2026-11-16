@@ -688,6 +688,9 @@ func (f *fakeSlack) ShareFilesContext(_ context.Context, share fileShare) error 
 	f.clock++
 	ts := fmt.Sprintf("%d.000000", f.clock)
 	p := fakePost{channelID: share.channelID, threadTS: share.threadTS, text: share.text, username: share.username, iconURL: share.iconURL, ts: ts}
+	if len(share.blocks) > 0 {
+		p.blocks = string(mustJSON(share.blocks))
+	}
 	f.posts = append(f.posts, p)
 	f.channels[share.channelID] = append(f.channels[share.channelID], slack.Message{Msg: slack.Msg{
 		Timestamp: ts, ThreadTimestamp: p.threadTS, User: f.auth.UserID, BotID: f.auth.BotID, Username: p.username, Text: p.text,

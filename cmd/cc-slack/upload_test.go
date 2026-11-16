@@ -160,24 +160,11 @@ func TestReplyAttachesImagesAsTheUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	sent := l.slack.sent()
-	if len(sent) != 2 || sent[0].ts != res.TS || sent[0].username != "yasyf (agent)" || sent[0].threadTS != testThread || sent[1].threadTS != testThread {
-		t.Fatalf("reply = %+v, sent = %+v, want the post as yasyf and its files' share, both in the thread", res, sent)
+	if len(sent) != 1 || sent[0].ts != res.TS || sent[0].username != "yasyf (agent)" || sent[0].threadTS != testThread {
+		t.Fatalf("reply = %+v, sent = %+v, want one share as yasyf in the thread, the post itself", res, sent)
 	}
 	if done := l.slack.completed(); len(done) != 1 || len(done[0]) != 2 {
 		t.Fatalf("completeUploadExternal = %+v, want one call for both files", done)
-	}
-}
-
-func TestShowingImagesRetriesInvalidBlocksWhileSlackProcesses(t *testing.T) {
-	l := startDaemon(t)
-	loggedIn(t, l)
-	l.slack.fail("chat.update", slack.SlackErrorResponse{Err: "invalid_blocks"})
-	l.post(opSend, map[string]any{"channel_id": testChannel, "files": []string{writeFile(t, "a.png", pngBytes)}})
-	if n := l.slack.callCount("chat.update"); n != 2 {
-		t.Fatalf("chat.update calls = %d, want one retry", n)
-	}
-	if sent := l.slack.sent(); len(sent) != 2 || sent[0].text != "a.png" {
-		t.Fatalf("sent = %+v, want the file names as the notification text", sent)
 	}
 }
 
@@ -189,8 +176,8 @@ func TestDMStatusAttachesImagesWithoutText(t *testing.T) {
 		t.Fatal(err)
 	}
 	sent := l.slack.sent()
-	if len(sent) != 2 || status["thread_ts"] != sent[0].ts || sent[1].threadTS != sent[0].ts || status["channel_id"] != "D"+testUser {
-		t.Fatalf("dm-status = %v, sent = %+v, want the post to open the session thread and its file's share under it", status, sent)
+	if len(sent) != 1 || status["thread_ts"] != sent[0].ts || sent[0].threadTS != "" || status["channel_id"] != "D"+testUser {
+		t.Fatalf("dm-status = %v, sent = %+v, want the share itself to open the session thread", status, sent)
 	}
 }
 
@@ -199,9 +186,9 @@ func TestDMStatusWithPicturesStillTurnsItsMarkdownIntoSlacksAndTitlesEachPicture
 	loggedIn(t, l)
 	png := writeFile(t, "p95 before and after.png", pngBytes)
 	l.do(opDMStatus, map[string]any{"text": "**The copy is fixed.** See [the run](https://example.com/run/1).", "files": []string{png}})
-	edits := l.slack.edited()
-	if len(edits) == 0 {
-		t.Fatal("dm-status never named its picture in the post")
+	sent := l.slack.sent()
+	if len(sent) != 1 {
+		t.Fatalf("sent = %+v, want the words and the picture in one share", sent)
 	}
 	var blocks []struct {
 		Type string `json:"type"`
@@ -213,17 +200,17 @@ func TestDMStatusWithPicturesStillTurnsItsMarkdownIntoSlacksAndTitlesEachPicture
 			Text string `json:"text"`
 		} `json:"title"`
 	}
-	if err := json.Unmarshal([]byte(edits[len(edits)-1].blocks), &blocks); err != nil {
+	if err := json.Unmarshal([]byte(sent[0].blocks), &blocks); err != nil {
 		t.Fatal(err)
 	}
-	if len(blocks) != 2 || blocks[0].Type != "section" || blocks[1].Type != "image" {
-		t.Fatalf("blocks = %+v, want the words then the picture", blocks)
+	if len(blocks) != 1 || blocks[0].Type != "section" {
+		t.Fatalf("blocks = %+v, want the words above the shared picture", blocks)
 	}
 	if want := "*The copy is fixed.* See <https://example.com/run/1|the run>."; blocks[0].Text.Text != want {
 		t.Fatalf("words = %q, want Slack's own markup %q", blocks[0].Text.Text, want)
 	}
-	if blocks[1].Title.Text != "p95 before and after" || blocks[1].AltText != "p95 before and after" {
-		t.Fatalf("picture titled %q with alt %q, want its name without .png", blocks[1].Title.Text, blocks[1].AltText)
+	if done := l.slack.completed(); len(done) != 1 || len(done[0]) != 1 || done[0][0].Title != "p95 before and after.png" {
+		t.Fatalf("completeUploadExternal = %+v, want the picture shared under its file name", done)
 	}
 }
 
@@ -420,8 +407,8 @@ func TestPollerSkipsItsOwnImagePost(t *testing.T) {
 	}
 	sent := f.slack.sent()
 	share := sent[len(sent)-1]
-	if share.ts == res.TS {
-		t.Fatalf("sent = %+v, want a share after the post %q", sent, res.TS)
+	if len(sent) != 1 || share.ts != res.TS {
+		t.Fatalf("sent = %+v, want the share to be the post %q", sent, res.TS)
 	}
 	if c := f.cursor(); c.oldest != share.ts {
 		t.Fatalf("cursor = %q, want it past the own post and share %q", c.oldest, share.ts)
