@@ -373,32 +373,9 @@ func (p *poller) tick(ctx context.Context) (time.Time, error) {
 	p.keepWatched(groups, seen)
 	settled, done := drainable(ctx, drainGrace)
 	defer done()
-	now := p.now()
-	var next time.Time
-	for _, g := range groups {
-		if ctx.Err() != nil {
-			break
-		}
-		if !p.isPending(g.key) {
-			continue
-		}
-		c, err := groupCursor(ctx, db, g)
-		if err != nil {
-			return time.Time{}, err
-		}
-		if due := p.dueAt(g.key, c); due.After(now) {
-			next = earliest(next, due)
-			continue
-		}
-		p.settle(g.key)
-		c, err = p.poll(settled, db, api, id.at(g.key.channelID), g, c)
-		if err != nil {
-			p.mark(g.key)
-			return time.Time{}, err
-		}
-		if p.isPending(g.key) {
-			next = earliest(next, p.dueAt(g.key, c))
-		}
+	next, err := p.pollGroups(ctx, settled, db, api, id, groups)
+	if err != nil {
+		return time.Time{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return next, err
@@ -1014,4 +991,35 @@ func (g cursorGroup) toChannelHolder(watching []watch) []watch {
 		return watching
 	}
 	return slices.DeleteFunc(slices.Clone(watching), func(w watch) bool { return w.Kind == kindChannel && w.ID != g.owner.ID })
+}
+
+func (p *poller) pollGroups(ctx, settled context.Context, db *sql.DB, api slackAPI, id identity, groups []cursorGroup) (time.Time, error) {
+	now := p.now()
+	var next time.Time
+	for _, g := range groups {
+		if ctx.Err() != nil {
+			break
+		}
+		if !p.isPending(g.key) {
+			continue
+		}
+		c, err := groupCursor(ctx, db, g)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if due := p.dueAt(g.key, c); due.After(now) {
+			next = earliest(next, due)
+			continue
+		}
+		p.settle(g.key)
+		c, err = p.poll(settled, db, api, id.at(g.key.channelID), g, c)
+		if err != nil {
+			p.mark(g.key)
+			return time.Time{}, err
+		}
+		if p.isPending(g.key) {
+			next = earliest(next, p.dueAt(g.key, c))
+		}
+	}
+	return next, nil
 }
