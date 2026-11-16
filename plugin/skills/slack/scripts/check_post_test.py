@@ -93,17 +93,17 @@ class CheckPostTest(unittest.TestCase):
 
     def test_flags_a_link_or_mention_inside_another_links_words_as_nested_never_as_a_bare_url(self) -> None:
         release = (
-            "<https://buildkite.com/acme/release/builds/14765|The release carrying "
+            "<https://buildkite.com/acme/app/builds/14765|The release carrying "
             "<https://github.com/acme/app/pull/54651|the fix that makes the view route return the read's real error>> "
             "is failing on its `runtime-api-next` image build."
         )
         mention = "<https://github.com/acme/app/pull/27801|the fix <@U0123ABCDE> asked for> merged."
-        self.assertEqual(kinds(release), [("nested-link", "<https://buildkite.com/acme/release/builds/14765|The release carrying")])
+        self.assertEqual(kinds(release), [("nested-link", "<https://buildkite.com/acme/app/builds/14765|The release carrying")])
         self.assertEqual(kinds(mention), [("nested-link", "<https://github.com/acme/app/pull/27801|the fix")])
 
     def test_accepts_the_inner_link_or_mention_put_after_the_links_words(self) -> None:
         release = (
-            "<https://buildkite.com/acme/release/builds/14765|Release 14765>, carrying "
+            "<https://buildkite.com/acme/app/builds/14765|Release 14765>, carrying "
             "<https://github.com/acme/app/pull/54651|the fix that makes the view route return the read's real error>, "
             "is failing on its `runtime-api-next` image build."
         )
@@ -305,7 +305,7 @@ class CheckPostTest(unittest.TestCase):
         )
         self.assertEqual(
             kinds(text),
-            [("release-build", "https://buildkite.com/acme/release/builds/17624"), ("card-unlinked", "on the card")],
+            [("release-build", "https://buildkite.com/acme/release/builds/17624"), ("card-unlinked", "Pick an option on the card")],
         )
 
     def test_flags_a_long_post_on_one_line(self) -> None:

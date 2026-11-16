@@ -26,7 +26,9 @@ BARE_URL_FIX = "wrap it as <url|short label>, words saying what it opens; Slack 
 ONE_PARAGRAPH_WORDS = 60
 RELEASE_BUILD = re.compile(r"https://buildkite\.com/[\w-]+/release/builds/\d+")
 RELEASE_BUILD_FIX = "link the release's own post in #releases, which the reader reads, never its Buildkite build"
-CARD_ASK = re.compile(r"(?i)\b(?:on|in|tap|from|under)\s+(?:the|your|its|this|that)\s+card\b")
+CARD_ASK = re.compile(
+    r"(?i)\b(?:pick|tap|choose|answer|approve|press|select|click)\b[^.!?\n]{0,60}?\b(?:on|in|under|from)\s+(?:the|your|its|this|that)\s+card\b|\btap\s+(?:the|your|its|this|that)\s+card\b"
+)
 SLACK_MESSAGE = re.compile(r"https://[\w-]+\.slack\.com/archives/[A-Z0-9]+/p\d+")
 CARD_ASK_FIX = "a line asking the reader to act on a card links that card, so it draws right under the post; never leave the reader to find it"
 
