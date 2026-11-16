@@ -922,16 +922,8 @@ func (p *poller) applyTap(ctx context.Context, id identity, a cardActionPush, k 
 		}
 		return nil
 	}
-	if ans, done := p.cards.answer(a.Channel, a.ThreadTS, k.ID); k.ID != "" && done && ans.Settled {
-		p.log.Printf("card action %s on %s: his tap overrules %q, which the drive settled", a.ActionID, a.MessageTS, ans.Label)
-		p.cards.release(a.Channel, a.ThreadTS, k.ID)
-	} else if k.ID != "" && done {
-		if ans.Undelivered != tapKey(a) {
-			p.log.Printf("card action %s on %s: dropped: the ask was already answered", a.ActionID, a.MessageTS)
-			return p.repeatTap(ctx, id, a, k, ans)
-		}
-		p.log.Printf("card action %s on %s: its answer was recorded but never delivered, so it is delivered now", a.ActionID, a.MessageTS)
-		p.cards.release(a.Channel, a.ThreadTS, k.ID)
+	if repeated, err := p.answeredTap(ctx, id, a, k); repeated {
+		return err
 	}
 	tappedAt := slackTime(a.ActionTS)
 	permalink := id.permalink(a.Channel, a.MessageTS, a.ThreadTS)
@@ -1103,6 +1095,23 @@ func (p *poller) tapPRRow(ctx context.Context, id identity, a cardActionPush, k 
 	}
 	p.applyPRTap(ctx, id, a.ref(), tap)
 	return nil
+}
+
+func (p *poller) answeredTap(ctx context.Context, id identity, a cardActionPush, k askTap) (bool, error) {
+	ans, done := p.cards.answer(a.Channel, a.ThreadTS, k.ID)
+	switch {
+	case k.ID == "" || !done:
+		return false, nil
+	case ans.Settled:
+		p.log.Printf("card action %s on %s: his tap overrules %q, which the drive settled", a.ActionID, a.MessageTS, ans.Label)
+	case ans.Undelivered != tapKey(a):
+		p.log.Printf("card action %s on %s: dropped: the ask was already answered", a.ActionID, a.MessageTS)
+		return true, p.repeatTap(ctx, id, a, k, ans)
+	default:
+		p.log.Printf("card action %s on %s: its answer was recorded but never delivered, so it is delivered now", a.ActionID, a.MessageTS)
+	}
+	p.cards.release(a.Channel, a.ThreadTS, k.ID)
+	return false, nil
 }
 
 func (p *poller) repeatTap(ctx context.Context, id identity, a cardActionPush, k askTap, ans askAnswer) error {
@@ -1913,11 +1922,13 @@ func (p *poller) tapFeedback(id identity, a cardActionPush, k askTap) func() {
 	timer := time.AfterFunc(tapFeedbackAfter, func() {
 		p.whisper(id, a, "⏳ Applying *"+mrkdwnEscapes.Replace(clipRunes(k.Label, cardMaxDetailLen))+"*…")
 	})
-	p.feedback.Store(tapKey(a), timer)
-	return func() {
-		timer.Stop()
-		p.feedback.Delete(tapKey(a))
+	p.feedbackMu.Lock()
+	if p.feedback == nil {
+		p.feedback = map[string]*time.Timer{}
 	}
+	p.feedback[tapKey(a)] = timer
+	p.feedbackMu.Unlock()
+	return func() { p.stopFeedback(tapKey(a)) }
 }
 
 func (p *poller) tellRecorded(id identity, a cardActionPush, ans askAnswer) {
@@ -1925,9 +1936,7 @@ func (p *poller) tellRecorded(id identity, a cardActionPush, ans askAnswer) {
 	if p.now().Before(ans.UndoUntil) {
 		change = "tap Undo until " + clock(ans.UndoUntil, p.now()) + " or reply in this thread to change it"
 	}
-	if timer, pending := p.feedback.LoadAndDelete(tapKey(a)); pending {
-		timer.(*time.Timer).Stop()
-	}
+	p.stopFeedback(tapKey(a))
 	p.whisper(id, a, "✓ Your answer *"+mrkdwnEscapes.Replace(clipRunes(ans.Label, cardMaxDetailLen))+"* is recorded, from "+clock(ans.At, p.now())+": "+change+".")
 }
 
@@ -1936,5 +1945,14 @@ func (p *poller) whisper(id identity, a cardActionPush, text string) {
 	defer cancel()
 	if _, err := p.newAPI(id.Token).PostEphemeralContext(ctx, a.Channel, a.User, slack.MsgOptionText(text, false), slack.MsgOptionTS(a.ThreadTS)); err != nil {
 		p.log.Printf("card action %s on %s: no feedback shown for the tap: %v", a.ActionID, a.MessageTS, err)
+	}
+}
+
+func (p *poller) stopFeedback(key string) {
+	p.feedbackMu.Lock()
+	defer p.feedbackMu.Unlock()
+	if timer, pending := p.feedback[key]; pending {
+		timer.Stop()
+		delete(p.feedback, key)
 	}
 }

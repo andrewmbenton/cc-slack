@@ -47,27 +47,28 @@ type plane interface {
 }
 
 type poller struct {
-	recard    func(ctx context.Context, id identity, card cardRef, pr refID)
-	decide    func(ctx context.Context, state any, questions map[string]spawnllm.Question, opts spawnllm.DecideOpts) (spawnllm.Decision, error)
-	keepUser  func(ctx context.Context, id identity) time.Time
-	plane     plane
-	newAPI    func(token string) slackAPI
-	alive     func(pid int) bool
-	now       func() time.Time
-	cache     *readCache
-	owed      *owedReplies
-	holds     *deliveryHolds
-	feeds     *feedStore
-	threads   *dmThreads
-	replay    *replayCursor
-	shortcuts *shortcutHandler
-	cards     *liveCards
-	taps      tapQueue
-	feedback  sync.Map
-	wakeCh    chan struct{}
-	reconcile atomic.Bool
-	paused    map[string]time.Time
-	log       *log.Logger
+	recard     func(ctx context.Context, id identity, card cardRef, pr refID)
+	decide     func(ctx context.Context, state any, questions map[string]spawnllm.Question, opts spawnllm.DecideOpts) (spawnllm.Decision, error)
+	keepUser   func(ctx context.Context, id identity) time.Time
+	plane      plane
+	newAPI     func(token string) slackAPI
+	alive      func(pid int) bool
+	now        func() time.Time
+	cache      *readCache
+	owed       *owedReplies
+	holds      *deliveryHolds
+	feeds      *feedStore
+	threads    *dmThreads
+	replay     *replayCursor
+	shortcuts  *shortcutHandler
+	cards      *liveCards
+	taps       tapQueue
+	feedbackMu sync.Mutex
+	feedback   map[string]*time.Timer
+	wakeCh     chan struct{}
+	reconcile  atomic.Bool
+	paused     map[string]time.Time
+	log        *log.Logger
 
 	mu      sync.Mutex
 	marks   uint64
