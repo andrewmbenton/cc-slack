@@ -55,6 +55,7 @@ type slackAPI interface {
 	ArchiveConversationContext(ctx context.Context, channelID string) error
 	InviteUsersToConversationContext(ctx context.Context, channelID string, users ...string) (*slack.Channel, error)
 	SetTopicOfConversationContext(ctx context.Context, channelID, topic string) (*slack.Channel, error)
+	SetPurposeOfConversationContext(ctx context.Context, channelID, purpose string) (*slack.Channel, error)
 	TabCanvasContext(ctx context.Context, channelID, title string, page slack.DocumentContent) (string, error)
 	EditCanvasContext(ctx context.Context, params slack.EditCanvasParams) error
 	DeleteCanvasContext(ctx context.Context, canvasID string) error

@@ -79,7 +79,8 @@ project's session hears the user there and the DM's holder does not; with no suc
 watch the DM's holder, or whoever else watches it, hears it as before.
 `cc-slack dm-owed` names each reply's `channel_id` and the `holder_session` that
 owes it, and `dm-status --as-holder --channel <id>` posts as that channel's holder.
-`cc-slack operator-channel <new-name> --rename <id>` renames one as the user, and
+`cc-slack operator-channel <new-name> --rename <id> [--purpose <text>]` renames one as
+the user and sets its description, renaming nothing when `<new-name>` is its name, and
 `cc-slack canvas --channel <id> --title <t>` draws the channel's own canvas from
 the markdown on stdin, creating it the first time and redrawing it after.
 

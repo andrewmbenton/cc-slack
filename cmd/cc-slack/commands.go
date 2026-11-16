@@ -1012,17 +1012,21 @@ func moveCardCmd(d cmd.Deps) *cobra.Command {
 
 func operatorChannelCmd(d cmd.Deps) *cobra.Command {
 	var f sessionFlags
-	var rename string
+	var rename, purpose string
 	c := &cobra.Command{
 		Use:   "operator-channel <name>",
-		Short: "Create a private channel as you with the bot in it, which cc-slack then treats as it treats your DM, and print its id; with --rename, rename that operator channel to <name> instead",
+		Short: "Create a private channel as you with the bot in it, which cc-slack then treats as it treats your DM, and print its id; with --rename, rename that operator channel to <name> instead, and with --purpose also set its description",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			return runOp(c, d, f, opOperatorChan, map[string]any{"name": args[0], "channel_id": rename})
+			if purpose != "" && rename == "" {
+				return errors.New("--purpose needs --rename <channel id>")
+			}
+			return runOp(c, d, f, opOperatorChan, map[string]any{"name": args[0], "channel_id": rename, "purpose": purpose})
 		},
 	}
 	f.bind(c)
-	c.Flags().StringVar(&rename, "rename", "", "id of the operator channel to rename to <name>, as you")
+	c.Flags().StringVar(&rename, "rename", "", "id of the operator channel to rename to <name>, as you; its current name renames nothing")
+	c.Flags().StringVar(&purpose, "purpose", "", "with --rename, the operator channel's new description, set as you")
 	return c
 }
 

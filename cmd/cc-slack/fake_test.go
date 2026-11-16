@@ -96,6 +96,7 @@ type fakeSlack struct {
 	canvases  map[string]fakeCanvas
 	boards    map[string]string
 	renamed   map[string]string
+	purposes  map[string]string
 	gone      []string
 	elsewhere map[string]bool
 }
@@ -121,6 +122,7 @@ func newFakeSlack() *fakeSlack {
 		canvases:  map[string]fakeCanvas{},
 		boards:    map[string]string{},
 		renamed:   map[string]string{},
+		purposes:  map[string]string{},
 		elsewhere: map[string]bool{},
 		clock:     1_800_000_000,
 	}
@@ -810,6 +812,24 @@ func (f *fakeSlack) CreateChannelCanvasContext(_ context.Context, channel string
 	f.canvases[id] = fakeCanvas{channel, "", page.Markdown}
 	f.boards[channel] = id
 	return id, nil
+}
+
+func (f *fakeSlack) SetPurposeOfConversationContext(_ context.Context, channelID, purpose string) (*slack.Channel, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("conversations.setPurpose"); err != nil {
+		return nil, err
+	}
+	f.purposes[channelID] = purpose
+	ch := &slack.Channel{}
+	ch.ID = channelID
+	return ch, nil
+}
+
+func (f *fakeSlack) channelPurposes() map[string]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return maps.Clone(f.purposes)
 }
 
 func (f *fakeSlack) RenameConversationContext(_ context.Context, channelID, channelName string) (*slack.Channel, error) {

@@ -2475,3 +2475,21 @@ func TestOperatorChannelRenameRenamesItAsHimAndRecordsTheNewName(t *testing.T) {
 	}
 	l.refused(opOperatorChan, map[string]any{"name": "team", "channel_id": testChannel}, "not one of your operator channels")
 }
+
+func TestOperatorChannelRenameToItsOwnNameOnlySetsItsDescription(t *testing.T) {
+	l := startDaemon(t)
+	loggedInWithOAuth(t, l)
+	recordPlatformChannel(t)
+	user := l.user.as(testUser)
+
+	var kept operatorChannel
+	if err := json.Unmarshal(l.do(opOperatorChan, map[string]any{"name": "durable-agents-platform", "channel_id": platformChannel, "purpose": "Platform's orders. Dashboard: https://dash.example/"}).Body, &kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != (operatorChannel{ID: platformChannel, Name: "durable-agents-platform"}) || len(user.renames()) != 0 {
+		t.Fatalf("kept %+v, renamed %v; want no rename for its own name", kept, user.renames())
+	}
+	if got := user.channelPurposes()[platformChannel]; got != "Platform's orders. Dashboard: https://dash.example/" {
+		t.Fatalf("purpose = %q, want the description set with his token", got)
+	}
+}

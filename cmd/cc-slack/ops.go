@@ -113,6 +113,7 @@ type opBody struct {
 	RootOnly  bool              `json:"root_only"`
 	Users     []string          `json:"users"`
 	Topic     string            `json:"topic"`
+	Purpose   string            `json:"purpose"`
 	Prefix    string            `json:"prefix"`
 	Query     string            `json:"query"`
 	FileID    string            `json:"file_id"`
@@ -2857,14 +2858,21 @@ func (a *app) renameOperatorChannel(hc daemon.HandlerCtx, id identity, b opBody)
 	if err != nil {
 		return fail(err.Error())
 	}
-	ch, err := user.RenameConversationContext(hc.Ctx, b.ChannelID, b.Name)
-	if err != nil {
-		return fail(fmt.Sprintf("rename #%s (%s) to #%s as you: %s", id.OperatorChannels[i].Name, b.ChannelID, b.Name, errorCode(err)))
-	}
 	renamed := slices.Clone(id.OperatorChannels)
-	renamed[i].Name = ch.Name
-	if err := storeJSON(operatorChannelsPath(), renamed); err != nil {
-		return fail(fmt.Sprintf("renamed %s to #%s in Slack but could not record it, so fix its name in %s by hand: %v", b.ChannelID, ch.Name, operatorChannelsPath(), err))
+	if b.Name != renamed[i].Name {
+		ch, err := user.RenameConversationContext(hc.Ctx, b.ChannelID, b.Name)
+		if err != nil {
+			return fail(fmt.Sprintf("rename #%s (%s) to #%s as you: %s", id.OperatorChannels[i].Name, b.ChannelID, b.Name, errorCode(err)))
+		}
+		renamed[i].Name = ch.Name
+		if err := storeJSON(operatorChannelsPath(), renamed); err != nil {
+			return fail(fmt.Sprintf("renamed %s to #%s in Slack but could not record it, so fix its name in %s by hand: %v", b.ChannelID, ch.Name, operatorChannelsPath(), err))
+		}
+	}
+	if b.Purpose != "" {
+		if _, err := user.SetPurposeOfConversationContext(hc.Ctx, b.ChannelID, b.Purpose); err != nil {
+			return fail(fmt.Sprintf("set the description of #%s (%s) as you: %s", renamed[i].Name, b.ChannelID, errorCode(err)))
+		}
 	}
 	return ok(renamed[i])
 }
