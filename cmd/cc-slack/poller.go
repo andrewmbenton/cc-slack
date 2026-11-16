@@ -375,7 +375,7 @@ func (p *poller) tick(ctx context.Context) (time.Time, error) {
 	defer done()
 	next, err := p.pollGroups(ctx, settled, db, api, id, groups)
 	if err != nil {
-		return time.Time{}, err
+		return next, err
 	}
 	if err := ctx.Err(); err != nil {
 		return next, err
@@ -997,8 +997,8 @@ func (p *poller) pollGroups(ctx, settled context.Context, db *sql.DB, api slackA
 	now := p.now()
 	var next time.Time
 	for _, g := range groups {
-		if ctx.Err() != nil {
-			break
+		if err := ctx.Err(); err != nil {
+			return next, err
 		}
 		if !p.isPending(g.key) {
 			continue
