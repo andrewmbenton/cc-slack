@@ -20,11 +20,9 @@ LEADING_THE = re.compile(r"^the\s+", re.IGNORECASE)
 NUMBER = re.compile(r"\d+")
 OWN_NUMBER = r"(?<![\w#.:/-]){}(?![\w%:/-]|[.,]\d)"
 IDS_ASKED = re.compile(r"(?<![\w'’])ids?(?![\w'’])", re.IGNORECASE)
-UNFURLING_URLS = (
-    r"[\w-]+\.sentry\.io/issues/",
-    r"sentry\.io/organizations/[\w-]+/issues/",
-    r"app\.datadoghq\.com/(?:monitors|incidents|event)/",
-)
+UNLABELED_LINK = re.compile(r"<((?:https?://|mailto:)[^<>|\s]+)(?:\|\s*\1\s*)?>")
+BARE_URL_FIX = "wrap it as <url|short label>, words saying what it opens; Slack draws a Slack message under words that name it and still unfurls a Sentry issue or Datadog monitor under them"
+ONE_PARAGRAPH_WORDS = 60
 
 
 def his_word(token: str, asked: Sequence[str]) -> bool:
@@ -51,6 +49,7 @@ class Rule:
     pattern: re.Pattern[str]
     fix: str
     reads_code: bool = True
+    reads_fences: bool = True
     reads_labels: bool = False
     reads_quotes: bool = True
     passes: Callable[[str, Sequence[str]], bool] | None = None
@@ -91,10 +90,27 @@ RULES = (
     ),
     Rule(
         "zone-label",
-        re.compile(r"\b(?:UTC|GMT|PST|PDT|PT)\b|\b\d{1,2}:\d{2}(?::\d{2})?Z\b"),
+        re.compile(r"\b(?:UTC|GMT|PST|PDT|PT)\b|\b\d{1,2}:\d{2}Z\b"),
         "state the time in the team's local time with no zone label, such as 5:25pm",
         reads_code=False,
         reads_labels=True,
+    ),
+    Rule(
+        "machine-time",
+        re.compile(r"(?<![\w:.-])\d{1,2}:\d{2}:\d{2}(?:\.\d+)?Z(?!\w)"),
+        "a log's UTC stamp, in a code span or not, is not a time the reader reads; write it in the team's local time, such as 1:15 AM, with no zone label",
+        reads_fences=False,
+        reads_labels=True,
+    ),
+    Rule(
+        "jargon",
+        re.compile(
+            r"(?i)(?<![\w./-])(?:fde-scan|(?:codex|design|reader|builder|designer)\s+jobs?|(?:an?|the)\s+(?:readers?|builders?)|ingress)(?![\w-])"
+        ),
+        "a word only the drive or its tools use means nothing to the reader; say what it does in plain words, such as the check that every change customer code can see runs, a second model reading the logs, or the engineer writing the fix",
+        reads_code=False,
+        reads_labels=True,
+        passes=his_word,
     ),
     Rule(
         "ulid",
@@ -110,8 +126,8 @@ RULES = (
     ),
     Rule(
         "bare-url",
-        re.compile(rf"https?://(?!{'|'.join(UNFURLING_URLS)})\S+"),
-        "wrap it as <url|short label>; Slack draws a Slack message under words that name it, and only a Sentry issue or Datadog monitor, incident, or event link stays bare so Slack unfurls it",
+        re.compile(r"https?://\S+"),
+        BARE_URL_FIX,
     ),
     Rule(
         "plain-name",
@@ -223,11 +239,11 @@ def plain(line: str, labels: bool = False) -> str:
 
 
 def check(text: str, asked: Sequence[str] = ()) -> list[Finding]:
-    findings = nested_links(text)
+    findings = nested_links(text) + unlabeled_links(text) + one_paragraph(text)
     for number, (line, fenced) in enumerate(fenced_lines(text), start=1):
         masked = {labels: plain(line, labels) for labels in (False, True)}
         for rule in RULES:
-            if fenced and not rule.reads_code:
+            if fenced and not (rule.reads_code and rule.reads_fences):
                 continue
             span = "token" if "token" in rule.pattern.groupindex else 0
             read = masked[rule.reads_labels] if rule.reads_code else mask_code(masked[rule.reads_labels])
@@ -247,6 +263,30 @@ def nested_links(text: str) -> list[Finding]:
     ]
 
 
+def unlabeled_links(text: str) -> list[Finding]:
+    return [
+        Finding(number, match.start() + 1, "bare-url", match[0], BARE_URL_FIX)
+        for number, (line, fenced) in enumerate(fenced_lines(text), start=1)
+        if not fenced
+        for match in UNLABELED_LINK.finditer(mask_code(line))
+    ]
+
+
+def one_paragraph(text: str) -> list[Finding]:
+    words = plain(mask_code(text), labels=True).split()
+    if len(words) <= ONE_PARAGRAPH_WORDS or "\n" in text.strip():
+        return []
+    return [
+        Finding(
+            1,
+            1,
+            "one-paragraph",
+            " ".join(words[:6]),
+            f"{len(words)} words with no line break; past {ONE_PARAGRAPH_WORDS} words, open with who it is for and the answer, then put each part under a short bold heading such as *What changed:* or *Why it matters:*, with lists as bullets",
+        )
+    ]
+
+
 def fenced_lines(text: str) -> Iterator[tuple[str, bool]]:
     fenced = False
     for line in text.splitlines():
@@ -257,7 +297,7 @@ def fenced_lines(text: str) -> Iterator[tuple[str, bool]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Flag internal ids, raw shas, unlinked references, links nested in another link's words, options named by number or position, plain-name greetings, unformatted identifiers, paragraphs listing what is not proven, lines reporting no change, apologies, and a post naming another draft of itself in a Slack post, reading the words of each link as the reader sees them."
+        description="Flag internal ids, raw shas, unlinked references, links shown as their own URL, a log's UTC time, drive and tool jargon, a post of more than 60 words on one line, links nested in another link's words, options named by number or position, plain-name greetings, unformatted identifiers, paragraphs listing what is not proven, lines reporting no change, apologies, and a post naming another draft of itself in a Slack post, reading the words of each link as the reader sees them."
     )
     parser.add_argument("path", nargs="?", default="-", help="post text file, or - for stdin")
     parser.add_argument(

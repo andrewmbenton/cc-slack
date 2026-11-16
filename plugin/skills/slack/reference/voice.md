@@ -19,15 +19,19 @@ order.
    `term_` handle, `G`/`R`/`L` ids, `brw_`/`run_`/`exec_`/`ctx_` ids, but not a
    table, column or label with no digit after that prefix, such as the
    `run_claims` table, ULIDs, bare `#N`
-   and build or PR numbers, bare URLs other than a Sentry issue or Datadog
-   monitor, incident, or event link, which stay bare so Slack unfurls them,
-   a Slack message link included, which draws an open card under words that
-   name it once a thread,
+   and build or PR numbers, bare URLs and links shown as their own URL, a
+   Sentry issue or Datadog monitor included, since Slack still unfurls one
+   under words that name it, and a Slack message link, which draws an open
+   card under such words once a thread,
    one-letter codenames such as "D", but not a letter naming an option such as
    "Direction B", multi-agent terms such as desk, walker, parity, and fence,
    and order and job ids such as o308, but never inside a function,
-   file, path, product or alert name or in a code span, zone
-   labels such as `PT` or `17:35Z` outside a code span or block, an option named by number or position
+   file, path, product or alert name or in a code span, drive and tool
+   jargon such as fde-scan, a codex job, a design job, a builder, a reader
+   or ingress unless the reader used the word, zone
+   labels such as `PT` or `17:35Z` outside a code span or block, a log's
+   `09:15:42Z` time even in a code span, a post of more than 60 words on
+   one line with no break or heading, an option named by number or position
    such as "same as 1" or "the first option", a greeting to a plain first name such as
    "Hi Andrew" where a mention belongs, an unbackticked `SNAKE_CASE`
    identifier, a paragraph past three sentences, a line outside a `>` quote

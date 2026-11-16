@@ -64,25 +64,28 @@ class CheckPostTest(unittest.TestCase):
         text = "Alert: <https://acme.slack.com/archives/C0123ABCDE/p1731123456789012|the disk alert>"
         self.assertEqual(kinds(text), [])
 
-    def test_accepts_a_bare_sentry_issue_link_so_it_unfurls(self) -> None:
-        text = "Issue: https://acme.sentry.io/issues/4512345678/"
-        self.assertEqual(kinds(text), [])
-
-    def test_accepts_a_bare_sentry_organization_issue_link_so_it_unfurls(self) -> None:
-        text = "Issue: https://sentry.io/organizations/acme/issues/4512345678/"
-        self.assertEqual(kinds(text), [])
-
-    def test_accepts_bare_datadog_monitor_incident_and_event_links_so_they_unfurl(self) -> None:
+    def test_flags_bare_sentry_and_datadog_links_since_they_unfurl_under_words_too(self) -> None:
         text = (
-            "Monitor: https://app.datadoghq.com/monitors/123456\n"
-            "Incident: https://app.datadoghq.com/incidents/42\n"
-            "Event: https://app.datadoghq.com/event/event?id=7890"
+            "Issue: https://acme.sentry.io/issues/4512345678/\n"
+            "Monitor: <https://app.datadoghq.com/monitors/123456>\n"
+            "Incident: <https://app.datadoghq.com/incidents/42|https://app.datadoghq.com/incidents/42>"
         )
+        self.assertEqual(
+            kinds(text),
+            [
+                ("bare-url", "https://acme.sentry.io/issues/4512345678/"),
+                ("bare-url", "<https://app.datadoghq.com/monitors/123456>"),
+                ("bare-url", "<https://app.datadoghq.com/incidents/42|https://app.datadoghq.com/incidents/42>"),
+            ],
+        )
+
+    def test_accepts_sentry_and_datadog_links_under_words_that_name_them(self) -> None:
+        text = "The <https://acme.sentry.io/issues/4512345678/|connection reset error> fired once; <https://app.datadoghq.com/monitors/123456|the ingest monitor> stayed green."
         self.assertEqual(kinds(text), [])
 
-    def test_flags_a_bare_github_link_beside_an_unfurling_one(self) -> None:
-        text = "Fix: https://github.com/acme/app/pull/27801 for https://acme.sentry.io/issues/4512345678/"
-        self.assertEqual(kinds(text), [("bare-url", "https://github.com/acme/app/pull/27801")])
+    def test_reads_no_link_in_code_as_bare(self) -> None:
+        text = "Run `curl <https://example.com/x>` to see it."
+        self.assertEqual(kinds(text), [])
 
     def test_flags_a_link_or_mention_inside_another_links_words_as_nested_never_as_a_bare_url(self) -> None:
         release = (
@@ -258,13 +261,43 @@ class CheckPostTest(unittest.TestCase):
             [("bare-number", "#830225"), ("bare-number", "build 1399"), ("bare-number", "#4031")],
         )
 
-    def test_reads_no_zone_label_inside_code(self) -> None:
+    def test_reads_no_zone_label_inside_code_but_flags_a_log_stamp_there(self) -> None:
         text = (
             "The queue filled at `23:58Z` and drained at `23:14:31Z`, from "
             "`service:runtime-api @timestamp:[2026-11-12T23:42:00Z TO 2026-11-12T23:58:00Z]`.\n"
-            "```\nstatus:error @timestamp:>2026-11-12T23:43:00Z tz:UTC\n```"
+            "```\nstatus:error @timestamp:>2026-11-12T23:43:00Z tz:UTC 23:43:10Z\n```"
         )
+        self.assertEqual(kinds(text), [("machine-time", "23:14:31Z")])
+
+    def test_flags_drive_and_tool_jargon_the_reader_never_used(self) -> None:
+        text = (
+            "A design job is on it and a builder starts next.\n"
+            "The reset hit the ingress; a codex job reads it, and nothing lands without fde-scan."
+        )
+        self.assertEqual(
+            kinds(text),
+            [
+                ("jargon", "design job"),
+                ("jargon", "a builder"),
+                ("jargon", "ingress"),
+                ("jargon", "codex job"),
+                ("jargon", "fde-scan"),
+            ],
+        )
+        self.assertEqual(
+            [(finding.kind, finding.token) for finding in check_post.check("The ingress reset once.", ["why did the ingress reset?"])],
+            [],
+        )
+
+    def test_passes_reader_and_builder_outside_the_job_sense(self) -> None:
+        text = "The image builder failed, and the RSS readers on staging timed out."
         self.assertEqual(kinds(text), [])
+
+    def test_flags_a_long_post_on_one_line(self) -> None:
+        line = " ".join(["word"] * 61) + "."
+        self.assertEqual(kinds(line), [("one-paragraph", "word word word word word word")])
+        self.assertEqual(kinds(" ".join(["word"] * 60) + "."), [])
+        self.assertEqual(kinds(" ".join(["word"] * 40) + ".\n\n" + " ".join(["word"] * 40) + "."), [])
 
     def test_still_flags_a_zone_label_beside_code(self) -> None:
         text = "The queue filled at 23:58Z, logged as `23:58Z`, and drained at 4:14 PM PT.\n```\nUTC\n```\nAll times UTC."
