@@ -315,12 +315,11 @@ var (
 		},
 		{
 			name:        "slack_history",
-			description: "Read a channel's recent top-level messages, newest first; with query, from, after or before, search Slack as you, channel_id narrowing it.",
+			description: "Read a channel's newest root messages, or with query search Slack as you.",
 			op:          opHistory, failure: actionRead,
 			properties: map[string]any{
 				"channel_id": channelProp, "url": urlProp,
-				"query": map[string]any{"type": "string"}, "from": map[string]any{"type": "string", "description": "user id or handle"},
-				"after": map[string]any{"type": "string", "description": "YYYY-MM-DD, exclusive"}, "before": map[string]any{"type": "string", "description": "YYYY-MM-DD, exclusive"},
+				"query": map[string]any{"type": "string"},
 				"limit": map[string]any{"type": "integer", "description": "default 20"},
 				"raw":   rawProp,
 			},

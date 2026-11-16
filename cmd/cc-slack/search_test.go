@@ -28,8 +28,8 @@ func TestSearchFindsMessagesAsTheUserWithItsFilters(t *testing.T) {
 	}
 
 	want := "buildkite in:<#" + testChannel + "> from:<@U0OWNER01> after:2026-11-13 before:2026-11-16"
-	if !slices.Equal(user.searched, []string{want}) || len(l.slack.searched) != 0 {
-		t.Fatalf("searched as the user %q and as the bot %q, want one search as the user for %q", user.searched, l.slack.searched, want)
+	if !slices.Equal(user.searches(), []string{want}) || len(l.slack.searches()) != 0 {
+		t.Fatalf("searched as the user %q and as the bot %q, want one search as the user for %q", user.searches(), l.slack.searches(), want)
 	}
 	if res.Query != want || res.Total != 1 || len(res.Messages) != 1 {
 		t.Fatalf("result = %+v, want the one match for %q", res, want)
@@ -45,8 +45,8 @@ func TestSearchRefusesADayItCannotRead(t *testing.T) {
 	user := l.user.as(testUser)
 
 	l.refused(opHistory, map[string]any{"from": "yasyf", "after": "Nov 14"}, `search after takes a day as YYYY-MM-DD, not "Nov 14"`)
-	if len(user.searched) != 0 {
-		t.Fatalf("searched %q, want nothing asked of Slack", user.searched)
+	if len(user.searches()) != 0 {
+		t.Fatalf("searched %q, want nothing asked of Slack", user.searches())
 	}
 }
 

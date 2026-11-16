@@ -1340,6 +1340,12 @@ func (f *fakeSlack) setDM(channelID string, users ...string) {
 	f.dms[channelID] = users
 }
 
+func (f *fakeSlack) searches() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.searched)
+}
+
 func (f *fakeSlack) SearchMessagesContext(_ context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
