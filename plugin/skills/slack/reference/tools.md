@@ -43,7 +43,7 @@ The tool names below have the full prefix
 | Archive an approved channel | `slack_channel_archive(channel_id)` |
 | Invite approved people to a channel | `slack_channel_invite(channel_id, users)` |
 | Set an approved channel topic | `slack_channel_topic(channel_id, topic)` |
-| Rename one of your operator channels, and set its description | `slack_channel_rename(channel_id, name, purpose?)`, as you; its own name renames nothing (CLI `cc-slack operator-channel <name> --rename <id> --purpose <text>`) |
+| Rename one of your operator channels, and set its description | CLI only, as you: `cc-slack operator-channel <name> --rename <id> --purpose <text>`; its own name renames nothing. No MCP tool, since a tool's schema costs every session's standing context |
 | Add the bot to an approved channel, private ones included | `slack_channel_join(channel_id)` |
 
 `cc-slack apply --plan <file>` cleans up the user's DM in one command. The

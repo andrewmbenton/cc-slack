@@ -394,17 +394,6 @@ var (
 			required: []string{"topic"},
 		},
 		{
-			name:        "slack_channel_rename",
-			description: "Rename one of your operator channels as you, and with purpose set its description; returns its id and name.",
-			op:          opOperatorChan, failure: actionChannel,
-			properties: map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "the operator channel's id"},
-				"name":       map[string]any{"type": "string", "description": "lowercase, no leading #; its current name renames nothing"},
-				"purpose":    map[string]any{"type": "string", "description": "the channel's new description"},
-			},
-			required: []string{"channel_id", "name"},
-		},
-		{
 			name:        "slack_channel_join",
 			description: "Add the bot to a channel so it can read and watch it.",
 			op:          opChannelJoin, failure: actionChannel,
