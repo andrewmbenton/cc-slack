@@ -1050,7 +1050,7 @@ func prAsks(asks []string) []string {
 	return slices.DeleteFunc(asks, func(ask string) bool { return !strings.HasPrefix(ask, `{"prs"`) })
 }
 
-func TestOnePostNamingAStackDrawsOneCardAndMarksAMembersOlderCardReplaced(t *testing.T) {
+func TestOnePostNamingAStackRedrawsAMembersCardInPlaceAsTheStacksOneCard(t *testing.T) {
 	const hisThread, laterThread = "1793804574.412309", "1793804999.100200"
 	for _, held := range []bool{false, true} {
 		t.Run(map[bool]string{false: "open", true: "held"}[held], func(t *testing.T) {
@@ -1086,50 +1086,42 @@ func TestOnePostNamingAStackDrawsOneCardAndMarksAMembersOlderCardReplaced(t *tes
 				t.Fatal(err)
 			}
 			l.do(opDMStatus, map[string]any{"thread_ts": hisThread, "text": "the stack is green", "tap_prs": urls})
-			eventually(t, "the stack's card in his thread", func() bool { return len(drawn()) == 2 })
-			fresh := drawn()[1]
+			eventually(t, "the stack's card drawn over #42's", func() bool { return strings.Contains(oldNow(), "app PR 44") })
+			if len(drawn()) != 1 {
+				t.Fatalf("PR cards %+v; want #42's card redrawn in place as the stack's, and no second card", drawn())
+			}
 			asks := prAsks(cmd.requests(t))
 			if want := `{"prs":[{"number":41,"repo":"acme/app"},{"number":42,"repo":"acme/app"},{"number":43,"repo":"acme/app"},{"number":44,"repo":"acme/app"}]}`; asks[len(asks)-1] != want {
 				t.Fatalf("card command asked %v, want the whole stack, #42 with it, in its last ask", asks)
 			}
 			for _, want := range []string{"app PR 41", "app PR 42", "app PR 43", "app PR 44", "Approve (Recommended)"} {
-				if !strings.Contains(shown(t, fresh)+fresh.blocks, want) {
-					t.Fatalf("stack card = %s, want %q in it", fresh.blocks, want)
+				if !strings.Contains(oldNow(), want) {
+					t.Fatalf("stack card = %s, want %q in it", oldNow(), want)
 				}
 			}
-			eventually(t, "#42's card marked replaced", func() bool { return strings.Contains(oldNow(), "*Replaced:* now one card for its stack of 4 PRs") })
-			if !strings.Contains(oldNow(), strings.ReplaceAll(fresh.ts, ".", "")) || strings.Contains(oldNow(), cardWaitAction) {
-				t.Fatalf("#42's card = %s, want a link to the stack's card and no buttons", oldNow())
-			}
-			if kept := strings.Contains(oldNow(), "Your answer to this version: ✓ *Hold* · answered"); kept != held {
-				t.Fatalf("#42's card = %s, want his Hold kept as its answer exactly when he held it", oldNow())
+			if strings.Contains(oldNow(), "*Replaced:*") {
+				t.Fatalf("stack card = %s, want it standing where #42's card was drawn", oldNow())
 			}
 			var listed driveCardsResult
 			if err := json.Unmarshal(l.do(opDriveCards, map[string]any{"name": "demo"}).Body, &listed); err != nil {
 				t.Fatal(err)
 			}
-			if len(listed.PRCards) != 1 || len(listed.PRCards[0].PRs) != 4 || !strings.Contains(listed.PRCards[0].URL, strings.ReplaceAll(fresh.ts, ".", "")) {
-				t.Fatalf("drive-cards = %+v, want the stack's card alone, with its four PRs", listed.PRCards)
+			if len(listed.PRCards) != 1 || len(listed.PRCards[0].PRs) != 4 || !strings.Contains(listed.PRCards[0].URL, strings.ReplaceAll(old.ts, ".", "")) {
+				t.Fatalf("drive-cards = %+v, want the stack's card alone, with its four PRs, where #42's was drawn", listed.PRCards)
 			}
 
-			replaced := oldNow()
 			l.do(opDMStatus, map[string]any{"thread_ts": laterThread, "text": "the stack still waits on you", "tap_prs": urls})
 			eventually(t, "a link to the stack's card in the later thread", func() bool {
-				return len(slices.DeleteFunc(cardLinks(l, fresh), func(p fakePost) bool { return p.threadTS != laterThread })) > 0
+				return len(slices.DeleteFunc(cardLinks(l, old), func(p fakePost) bool { return p.threadTS != laterThread })) > 0
 			})
-			if len(drawn()) != 2 {
+			if len(drawn()) != 1 {
 				t.Fatalf("PR cards %+v; want the stack's card left where it was drawn", drawn())
 			}
-			for _, edit := range editsOf(l.slack.edited(), fresh.ts) {
-				if strings.Contains(edit, "*Replaced:*") {
-					t.Fatalf("stack card edits = %v, want it standing where it was drawn", edit)
-				}
-			}
-			asked, redrawn := len(prAsks(cmd.requests(t))), len(editsOf(l.slack.edited(), fresh.ts))
+			asked, redrawn := len(prAsks(cmd.requests(t))), len(editsOf(l.slack.edited(), old.ts))
 			l.do(opRedrawPRCards, map[string]any{})
-			eventually(t, "the stack's card redrawn in place", func() bool { return len(editsOf(l.slack.edited(), fresh.ts)) > redrawn })
-			if len(drawn()) != 2 || len(prAsks(cmd.requests(t))) != asked+1 || oldNow() != replaced {
-				t.Fatalf("PR cards %+v; want no third card, the redraw's one ask alone, and #42's card left as replaced", drawn())
+			eventually(t, "the stack's card redrawn in place", func() bool { return len(editsOf(l.slack.edited(), old.ts)) > redrawn })
+			if len(drawn()) != 1 || len(prAsks(cmd.requests(t))) != asked+1 {
+				t.Fatalf("PR cards %+v; want no second card and the redraw's one ask alone", drawn())
 			}
 		})
 	}

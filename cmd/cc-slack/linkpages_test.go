@@ -191,7 +191,7 @@ func TestAPostDrawsTheTapCardOfEachPRItLinksWhateverItsWords(t *testing.T) {
 	}
 }
 
-func TestALineLinkingAPRByURLOrByItsCardGetsItsTapCardRightUnderIt(t *testing.T) {
+func TestALineLinkingAPRByURLOrByItsCardLeavesItsTapCardWhereItWasDrawn(t *testing.T) {
 	const hisThread = "1793804574.412309"
 	cmd := fakeCardCommand(t, []string{"acme/app#41"}, mergeRowCard())
 	l, _ := cardingDaemon(t, cmd.argv, "acme/app#41")
@@ -201,15 +201,23 @@ func TestALineLinkingAPRByURLOrByItsCardGetsItsTapCardRightUnderIt(t *testing.T)
 		if err := json.Unmarshal(l.do(opDMStatus, map[string]any{"thread_ts": hisThread, "text": text, "tap_prs": tapPRs}).Body, &sent); err != nil {
 			t.Fatal(err)
 		}
-		card := postUnder(t, l, hisThread, sent["ts"])
-		if sent["card_ts"] != card.ts || !strings.Contains(card.blocks, "Merge (Recommended)") {
-			t.Fatalf("dm-status = %v, post under %q = %+v; want #41's card with Merge right under the line, named in the reply", sent, text, card)
-		}
 		return sent
 	}
-	said("#41 is green", tapPR41)
-	byURL := said("Waiting on you: <"+tapPR41[0]+"|your card's fix>'s Approve", nil)
-	said("Its Merge is on <"+byURL["card_permalink"]+"|its card>", nil)
+	first := said("#41 is green", tapPR41)
+	card := postUnder(t, l, hisThread, first["ts"])
+	if first["card_ts"] != card.ts || !strings.Contains(card.blocks, "Merge (Recommended)") {
+		t.Fatalf("dm-status = %v, post under the line = %+v; want #41's card with Merge right under it, named in the reply", first, card)
+	}
+	said("Waiting on you: <"+tapPR41[0]+"|your card's fix>'s Approve", nil)
+	said("Its Merge is on <"+first["card_permalink"]+"|its card>", nil)
+	if cards := prCards(l, testDM); len(cards) != 1 || cards[0].ts != card.ts {
+		t.Fatalf("PR cards = %+v, want #41's one card where it was drawn", cards)
+	}
+	for _, edit := range editsOf(l.slack.edited(), card.ts) {
+		if strings.Contains(edit, "*Replaced:*") {
+			t.Fatalf("card edits = %v, want the card standing where it was drawn", edit)
+		}
+	}
 }
 
 func TestAPostLinkingAPRTheCardCommandSkipsGoesOutAndRefusesNothing(t *testing.T) {

@@ -204,9 +204,7 @@ of those cards that was not withdrawn, under its own `waits`, so an answer the
 older PRs got never stands for the PRs it adds, and nothing new posts. Each
 other such card is edited in place to say it was replaced, with a link to the
 card that now carries its PRs and the answer it got, and is never redrawn
-again. A text line in a thread whose `tap_prs` regroup the PRs still posts the
-new card under itself, as a later text post below says, and marks each older
-card replaced. An older open card the program
+again. An older open card the program
 declines to redraw still shows with the post. A merged or closed PR gets no card. A card the program draws for a PR and
 head that a pick card already offers, with the same answers, is not posted. The program prints `{"cards": [{"repo", "number", "card"}], "skipped": [{"repo", "number", "reason"}]}`, each
 `card` a waiting `dm-status` card with `options`, and the daemon posts each
@@ -222,12 +220,11 @@ fresh card on the card itself. In the bot's DM a PR has one card, opened where
 the post naming it sits: at the root in its own thread, watched by the session
 whose post named the PR, for a post at the root, and in the thread for a post
 in a DM thread; a post lands in a DM thread only when its call names that
-thread. A later text post in a thread whose `tap_prs` names the PR posts its
-card again right under the post, in that thread, while the card still asks, and
-edits the card it replaces, wherever it sat, to say it was asked again under a
-newer line, with a link to the new card and no buttons, so every line asking the
-engineer's tap has the buttons under it; a card the engineer answered is redrawn
-where it sits. A post linking the PR or its card does the same. A later post
+thread. A card stays where it was drawn: a later text post whose `tap_prs` names
+the PR redraws its card in place and links it under the post when it sits in
+another thread, and never posts it again or marks it replaced, so the card he
+saw first is the one that stands. A post linking the PR or its card does the
+same. A later post
 naming the PR at a root carries or links it. A call whose `tap_prs` comes with no text, card, blocks or files only
 draws: it asks the program for each PR's card, redraws a posted one in place,
 offering again an answer whose waits id the program still asks, and posts a
