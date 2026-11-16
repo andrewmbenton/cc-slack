@@ -422,7 +422,7 @@ func legacyCopy(t *testing.T, l *liveDaemon, link, thread string) postResult {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocks, _, err := copyBlocks(l.ctx, l.app.newAPI(id.Token), id, ref, link)
+	blocks, _, err := copyBlocks(l.ctx, l.app.newAPI(id.Token), ref, link)
 	if err != nil {
 		t.Fatal(err)
 	}
