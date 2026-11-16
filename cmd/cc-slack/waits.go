@@ -32,6 +32,7 @@ var (
 	waitsLinking  = regexp.MustCompile(`(?i)\b(?:is|are|was|were|am|be|been|being|stays?|remains?)\b`)
 	waitsStates   = regexp.MustCompile(`(?i)(?:\b[a-z-]+(?: [a-z-]+){0,2}, )+[a-z-]+(?: [a-z-]+){0,2},? or waiting on you([^\w\s'’]|\s*$)`)
 	dmCardLink    = regexp.MustCompile(`^D[A-Z0-9]+$`)
+	slackCardLink = regexp.MustCompile(`^[CDG][A-Z0-9]+$`)
 )
 
 var (
@@ -93,6 +94,8 @@ func waitsWithoutCard(text string, card func(permalinkRef) bool, prs bool) (wait
 }
 
 func dmCard(ref permalinkRef) bool { return dmCardLink.MatchString(ref.channelID) }
+
+func slackCard(ref permalinkRef) bool { return slackCardLink.MatchString(ref.channelID) }
 
 func (w waitsLine) refusal() string {
 	return fmt.Sprintf("this post says %q, which waits on him, and links no open card in your DM with the app: link the card's permalink from its line in `cc-slack drive-cards --drive <drive>`, or `--waits <its waits id>`, under words that name it, as <permalink|the lock card>, and Slack draws the card under the line, or, on a line waiting on his tap or approval of a PR, link the URL of the PR he taps, and cc-slack draws its tap card with the post; a line waiting on his pick, answer, call or decision links its open question card, which no PR's tap card stands in for", w.sentence)
