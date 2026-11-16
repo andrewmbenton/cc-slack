@@ -69,6 +69,7 @@ type fileShare struct {
 	channelID string
 	threadTS  string
 	text      string
+	blocks    []slack.Block
 	username  string
 	iconURL   string
 }
@@ -190,6 +191,13 @@ func (c *apiClient) ShareFilesContext(ctx context.Context, share fileShare) erro
 	}
 	if share.text != "" {
 		form.Set("initial_comment", share.text)
+	}
+	if len(share.blocks) > 0 {
+		body, err := json.Marshal(share.blocks)
+		if err != nil {
+			return err
+		}
+		form.Set("blocks", string(body))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"files.completeUploadExternal", strings.NewReader(form.Encode()))
 	if err != nil {

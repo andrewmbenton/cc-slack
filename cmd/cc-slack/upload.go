@@ -1,7 +1,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -246,42 +244,23 @@ func uploadFiles(ctx context.Context, api slackAPI, paths []string) ([]slack.Fil
 	return files, nil
 }
 
-func postImages(ctx context.Context, api slackAPI, record func(channelID, ts string), id identity, channelID, threadTS, text string, blocks []slack.Block, paths []string, extra ...slack.MsgOption) (string, string, error) {
+// postImages posts the message and its pictures as one file share, its blocks above the files, since a message naming files
+// it does not share shows broken images to readers, and a separate share in its thread showed each picture twice.
+func postImages(ctx context.Context, api slackAPI, record func(channelID, ts string), id identity, channelID, threadTS, text string, blocks []slack.Block, paths []string) (string, string, error) {
 	files, err := uploadFiles(ctx, api, paths)
 	if err != nil {
 		return "", "", err
 	}
-	notice := shortText(fallbackText(text, files))
-	opts := id.postOptions(notice, threadTS, extra...)
-	if body := messageBlocks(text, blocks); len(body) > 0 {
-		opts = append(opts, slack.MsgOptionBlocks(body...))
-	}
-	ch, ts, err := api.PostMessageContext(ctx, channelID, opts...)
-	if err != nil {
+	share := fileShare{files: files, channelID: channelID, threadTS: threadTS, blocks: messageBlocks(text, blocks), username: id.username(), iconURL: id.AvatarURL}
+	if err := api.ShareFilesContext(ctx, share); err != nil {
 		return "", "", err
 	}
-	err = shareProcessed(ctx, api, record, id, ch, cmp.Or(threadTS, ts), files)
-	if err == nil {
-		err = whileProcessing(ctx, func() error {
-			return updateMessage(ctx, api, ch, ts, notice, imageMessage(text, blocks, files), extra...)
-		})
-	}
+	ts, err := awaitShared(ctx, api, files[0], channelID, threadTS)
 	if err != nil {
-		notePostWarning(ctx, "the message posted without its pictures: "+err.Error())
-	}
-	return ch, ts, nil
-}
-
-// An image block names a file without sharing it, and Slack keeps a file completed with no channel private, which is how readers got
-// broken images while the bot's own reads of the file succeeded. So a message goes up first, its thread takes the real share, and
-// only then does the message name the files.
-func shareProcessed(ctx context.Context, api slackAPI, record func(channelID, ts string), id identity, channelID, thread string, files []slack.FileSummary) error {
-	ts, err := shareUploaded(ctx, api, id, channelID, thread, "", files)
-	if err != nil {
-		return err
+		return "", "", sharedError{files[0].Title, channelID, err.Error()}
 	}
 	record(channelID, ts)
-	return awaitProcessed(ctx, api, files)
+	return channelID, ts, nil
 }
 
 // Slack can refuse a just-processed file with invalid_blocks for a moment after files.info reports its size.
@@ -318,27 +297,6 @@ func uploadFile(ctx context.Context, api slackAPI, path string) (slack.FileSumma
 	return slack.FileSummary{ID: target.FileID, Title: name}, nil
 }
 
-func awaitProcessed(ctx context.Context, api slackAPI, files []slack.FileSummary) error {
-	for _, want := range files {
-		for attempt := 1; ; attempt++ {
-			file, _, _, err := api.GetFileInfoContext(ctx, want.ID, 0, 0)
-			if err != nil {
-				return err
-			}
-			if file.OriginalW > 0 {
-				break
-			}
-			if attempt == readyTries {
-				return fmt.Errorf("slack never finished processing %s (%s)", want.Title, want.ID)
-			}
-			if err := pause(ctx, readyWait); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 var pause = func(ctx context.Context, wait time.Duration) error {
 	select {
 	case <-ctx.Done():
@@ -346,20 +304,6 @@ var pause = func(ctx context.Context, wait time.Duration) error {
 	case <-time.After(wait):
 		return nil
 	}
-}
-
-func imageMessage(text string, body []slack.Block, files []slack.FileSummary) []slack.Block {
-	blocks := messageBlocks(text, body)
-	for _, file := range files {
-		blocks = append(blocks, imageBlock(file))
-	}
-	return blocks
-}
-
-func imageBlock(file slack.FileSummary) slack.Block {
-	title := strings.TrimSuffix(file.Title, filepath.Ext(file.Title))
-	return slack.NewImageBlockSlackFile(&slack.SlackFileObject{ID: file.ID}, title, "",
-		slack.NewTextBlockObject(slack.PlainTextType, title, false, false))
 }
 
 func messageBlocks(text string, blocks []slack.Block) []slack.Block {
@@ -399,15 +343,4 @@ func textBlocks(text string) []slack.Block {
 		rest = rest[n:]
 	}
 	return blocks
-}
-
-func fallbackText(text string, files []slack.FileSummary) string {
-	if text != "" {
-		return text
-	}
-	names := make([]string, 0, len(files))
-	for _, file := range files {
-		names = append(names, file.Title)
-	}
-	return strings.Join(names, ", ")
 }

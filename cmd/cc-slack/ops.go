@@ -1003,7 +1003,7 @@ func publish(ctx context.Context, api slackAPI, record func(channelID, ts string
 		return "", "", err
 	}
 	if images {
-		return postImages(ctx, api, record, id, channelID, threadTS, text, blocks, files, extra...)
+		return postImages(ctx, api, record, id, channelID, threadTS, text, blocks, files)
 	}
 	return shareFiles(ctx, api, id, channelID, threadTS, text, files)
 }

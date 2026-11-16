@@ -71,7 +71,7 @@ func (s *slackServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("OK"))
 	case r.URL.Path == "/files.completeUploadExternal":
 		_ = r.ParseForm()
-		for _, key := range []string{"files", "channel_id", "channels", "thread_ts", "initial_comment", "username", "icon_url"} {
+		for _, key := range []string{"files", "channel_id", "channels", "thread_ts", "initial_comment", "blocks", "username", "icon_url"} {
 			s.completed[key] = r.Form.Get(key)
 		}
 		s.auth = r.Header.Get("Authorization")
@@ -113,7 +113,7 @@ func (s *slackServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func TestPostImagesSharesTheFilesInTheThreadBeforeTheMessageNamesThem(t *testing.T) {
+func TestPostImagesSharesTheFilesAsTheMessageItselfWithItsBlocksAboveThem(t *testing.T) {
 	fake := &slackServer{uploaded: map[string]string{}, completed: map[string]string{}, infoCalls: map[string]int{}}
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
@@ -126,67 +126,25 @@ func TestPostImagesSharesTheFilesInTheThreadBeforeTheMessageNamesThem(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ch != testChannel || ts != "1800000000.000900" {
-		t.Fatalf("postImages = %s/%s", ch, ts)
-	}
-	want := []uploadRequest{{"a.png", "16"}, {"b.gif", "10"}}
-	if len(fake.requested) != 2 || fake.requested[0] != want[0] || fake.requested[1] != want[1] {
-		t.Fatalf("getUploadURLExternal = %+v, want %+v", fake.requested, want)
+	if ch != testChannel || ts != "1800000000.000700" {
+		t.Fatalf("postImages = %s/%s, want the share's own ts", ch, ts)
 	}
 	if fake.uploaded["Fa.png"] != pngBytes || fake.uploaded["Fb.gif"] != gifBytes {
 		t.Fatalf("uploaded = %q", fake.uploaded)
 	}
-	if fake.completed["channel_id"] != testChannel || fake.completed["thread_ts"] != testThread || fake.completed["initial_comment"] != "" {
-		t.Fatalf("completeUploadExternal = %+v, want the files shared in the message's thread", fake.completed)
+	if fake.completed["channel_id"] != testChannel || fake.completed["thread_ts"] != testThread || fake.completed["initial_comment"] != "" || fake.completed["username"] != "yasyf (agent)" {
+		t.Fatalf("completeUploadExternal = %+v, want the files shared as the post in its thread", fake.completed)
 	}
-	if fake.infoCalls["Fa.png"] < 2 || fake.infoCalls["Fb.gif"] < 2 {
-		t.Fatalf("files.info calls = %v, want each file polled until processed", fake.infoCalls)
-	}
-	if len(fake.posts) != 1 {
-		t.Fatalf("chat.postMessage calls = %d, want one", len(fake.posts))
-	}
-	post := fake.posts[0]
-	if post["username"] != "yasyf (agent)" || post["icon_url"] != "https://avatars/ym.png" || post["thread_ts"] != testThread || post["text"] != "the map" {
-		t.Fatalf("post = %+v, want yasyf with the user's avatar in the thread", post)
-	}
-	if ids := imageIDs(t, post["blocks"]); len(ids) != 0 {
-		t.Fatalf("first post names files %v before they are shared", ids)
-	}
-	if len(fake.updates) != 2 {
-		t.Fatalf("chat.update calls = %d, want a retry after invalid_blocks", len(fake.updates))
-	}
-	update := fake.updates[1]
 	var blocks []map[string]any
-	if err := json.Unmarshal([]byte(update["blocks"]), &blocks); err != nil {
+	if err := json.Unmarshal([]byte(fake.completed["blocks"]), &blocks); err != nil {
 		t.Fatal(err)
 	}
-	if len(blocks) != 3 || blocks[0]["type"] != "section" || blocks[1]["type"] != "image" || blocks[2]["type"] != "image" {
-		t.Fatalf("blocks = %s", update["blocks"])
+	if len(blocks) != 1 || blocks[0]["type"] != "section" {
+		t.Fatalf("blocks = %s, want the text's section above the files", fake.completed["blocks"])
 	}
-	title, _ := blocks[1]["title"].(map[string]any)
-	if ids := imageIDs(t, update["blocks"]); strings.Join(ids, ",") != "Fa.png,Fb.gif" || blocks[1]["alt_text"] != "a" || title["text"] != "a" {
-		t.Fatalf("image blocks = %+v", blocks[1:])
+	if len(fake.posts) != 0 || len(fake.updates) != 0 {
+		t.Fatalf("chat.postMessage %d and chat.update %d calls, want none beside the share", len(fake.posts), len(fake.updates))
 	}
-}
-
-func imageIDs(t *testing.T, raw string) []string {
-	t.Helper()
-	var blocks []struct {
-		Type      string `json:"type"`
-		SlackFile struct {
-			ID string `json:"id"`
-		} `json:"slack_file"`
-	}
-	if err := json.Unmarshal([]byte(raw), &blocks); err != nil {
-		t.Fatal(err)
-	}
-	var ids []string
-	for _, b := range blocks {
-		if b.Type == "image" {
-			ids = append(ids, b.SlackFile.ID)
-		}
-	}
-	return ids
 }
 
 func TestReplyAttachesImagesAsTheUser(t *testing.T) {
@@ -575,9 +533,5 @@ func TestBlocksCombineWithImagesOnly(t *testing.T) {
 	png := writeFile(t, "a.png", pngBytes)
 	if err := checkAttachments("the map", blocks, []string{png}, false); err != nil {
 		t.Fatalf("blocks with an image: %v", err)
-	}
-	message := imageMessage("the map", blocks, []slack.FileSummary{{ID: "Fa.png", Title: "a.png"}})
-	if len(message) != 2 || message[0].BlockType() != slack.MBTSection || message[1].BlockType() != slack.MBTImage {
-		t.Fatalf("image message = %+v, want the given blocks then the image", message)
 	}
 }
