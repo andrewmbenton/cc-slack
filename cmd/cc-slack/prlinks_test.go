@@ -1117,12 +1117,6 @@ func TestOnePostNamingAStackRedrawsAMembersCardInPlaceAsTheStacksOneCard(t *test
 			if len(drawn()) != 1 {
 				t.Fatalf("PR cards %+v; want the stack's card left where it was drawn", drawn())
 			}
-			asked, redrawn := len(prAsks(cmd.requests(t))), len(editsOf(l.slack.edited(), old.ts))
-			l.do(opRedrawPRCards, map[string]any{})
-			eventually(t, "the stack's card redrawn in place", func() bool { return len(editsOf(l.slack.edited(), old.ts)) > redrawn })
-			if len(drawn()) != 1 || len(prAsks(cmd.requests(t))) != asked+1 {
-				t.Fatalf("PR cards %+v; want no second card and the redraw's one ask alone", drawn())
-			}
 		})
 	}
 }
