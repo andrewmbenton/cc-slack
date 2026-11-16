@@ -857,11 +857,26 @@ def bounded(work: Callable[[], HookResult]) -> HookResult:
 def named_ticket(evt: PreToolUseEvent, ctx: Context, ticket: Ticket) -> HookResult:
     fields = {"ticket_id": ticket.id, "ticket_tree": ticket.tree, "ticket_agent": ctx.agent, "ticket_call": ctx.call, "ticket_fingerprint": ctx.action.fingerprint}
     if evt.tool_name != "Bash":
+        kept_ticket(evt, fields)
         return evt.rewrite(dict(evt.input.raw) | fields)
     call = cli_calls(evt)[0][0]
     head, _, tail = evt.input.raw["command"].partition(call.command.raw)
     flags = " ".join(f"--{TICKET_FLAGS[name]} {shlex.quote(value)}" for name, value in fields.items())
     return evt.rewrite_command(f"{head}{call.command.raw} {flags}{tail}")
+
+
+def tickets_dir() -> Path:
+    return Path(reqenv.getenv("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "cc-slack" / "tickets"
+
+
+def kept_ticket(evt: PreToolUseEvent, fields: dict[str, str]) -> None:
+    if not (use := evt._raw.get("tool_use_id")):
+        return
+    folder = tickets_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    written = folder / f".{use}.tmp"
+    written.write_text(json.dumps(fields))
+    written.replace(folder / f"{use}.json")
 
 
 def unchecked(evt: PreToolUseEvent, write: Write, conv: Conversation, exc: Exception) -> HookResult:

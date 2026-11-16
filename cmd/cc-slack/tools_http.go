@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yasyf/cc-interact/channel"
@@ -30,7 +32,10 @@ const (
 	toolsBodyBytes = 4 << 20
 	toolsBindRetry = time.Second
 	toolsStageWait = 10 * time.Second
+	toolUseMeta    = "claudecode/toolUseId"
 )
+
+var metaSeen sync.Once
 
 type origin struct {
 	env []string
@@ -110,6 +115,15 @@ func toolsHandler(s *daemon.Server) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		var tools []channel.Tool
 		if msg.Method == "tools/call" {
+			if body, err = ticketed(body, logger); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			line.Reset()
+			if err := json.Compact(&line, body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			win, err := callerWindow(r)
 			if err != nil {
 				_, _ = w.Write(mustJSON(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
@@ -135,6 +149,78 @@ func toolsHandler(s *daemon.Server) http.Handler {
 		}
 		_, _ = w.Write(reply)
 	})
+}
+
+func ticketsDir() (string, error) {
+	if state := os.Getenv("XDG_STATE_HOME"); state != "" {
+		return filepath.Join(state, binaryName, "tickets"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "state", binaryName, "tickets"), nil
+}
+
+func ticketed(body []byte, logger *log.Logger) ([]byte, error) {
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, err
+	}
+	var params struct {
+		Arguments map[string]json.RawMessage `json:"arguments"`
+		Meta      map[string]json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(req["params"], &params); err != nil {
+		return nil, err
+	}
+	var use string
+	if raw, ok := params.Meta[toolUseMeta]; ok {
+		if err := json.Unmarshal(raw, &use); err != nil {
+			return nil, err
+		}
+	}
+	metaSeen.Do(func() {
+		logger.Printf("tools/call _meta keys %v, %s %q", slices.Sorted(maps.Keys(params.Meta)), toolUseMeta, use)
+	})
+	if use == "" || strings.ContainsAny(use, "/\\") {
+		return body, nil
+	}
+	dir, err := ticketsDir()
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, use+".json")
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the name is a tool use id with no path separator, under cc-slack's own state.
+	if errors.Is(err, os.ErrNotExist) {
+		return body, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = os.Remove(path)
+	if _, ok := params.Arguments["ticket_id"]; ok {
+		return body, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("ticket file %s: %w", path, err)
+	}
+	var whole map[string]json.RawMessage
+	if err := json.Unmarshal(req["params"], &whole); err != nil {
+		return nil, err
+	}
+	if params.Arguments == nil {
+		params.Arguments = map[string]json.RawMessage{}
+	}
+	maps.Copy(params.Arguments, fields)
+	if whole["arguments"], err = json.Marshal(params.Arguments); err != nil {
+		return nil, err
+	}
+	if req["params"], err = json.Marshal(whole); err != nil {
+		return nil, err
+	}
+	return json.Marshal(req)
 }
 
 func rpcReply(out, id json.RawMessage) ([]byte, error) {

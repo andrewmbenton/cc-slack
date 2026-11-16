@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,5 +47,44 @@ func TestRegisteredWindow(t *testing.T) {
 				t.Fatalf("registeredWindow() = %+v, %v; want %+v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestAToolCallTakesTheTicketItsHookKeptByToolUseIDOnce(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir, err := ticketsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(dir, "toolu_1.json")
+	if err := os.WriteFile(kept, []byte(`{"ticket_id":"abc123","ticket_tree":"root"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logger := log.New(io.Discard, "", 0)
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slack_send","arguments":{"channel_id":"C1","text":"hi"},"_meta":{"claudecode/toolUseId":"toolu_1"}}}`
+	got, err := ticketed([]byte(call), logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req struct {
+		Params struct {
+			Arguments map[string]string `json:"arguments"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(got, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Params.Arguments["ticket_id"] != "abc123" || req.Params.Arguments["ticket_tree"] != "root" || req.Params.Arguments["text"] != "hi" {
+		t.Fatalf("arguments %v, want the kept ticket merged into the typed ones", req.Params.Arguments)
+	}
+	if _, err := os.Stat(kept); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ticket file still there: %v", err)
+	}
+	again, err := ticketed([]byte(call), logger)
+	if err != nil || string(again) != call {
+		t.Fatalf("second call = %s, %v; want it unchanged with no file left", again, err)
 	}
 }
