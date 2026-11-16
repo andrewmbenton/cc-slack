@@ -579,7 +579,7 @@ func TestACopyIsTheWholeCardWithEveryParagraph(t *testing.T) {
 	}
 }
 
-func TestACopyOfACardWhoseHeaderReadsBackPastSlacksLimitIsCutOnAWord(t *testing.T) {
+func TestACopyOfACardWhoseHeaderReadsBackPastSlacksLimitShowsItWholeInBold(t *testing.T) {
 	l, id, _, thread := copyDaemon(t, cardBody("Merge the stack?", "merge it"))
 	long := ":raising_hand: " + strings.Repeat("ship it ", 17) + "soon"
 	const card = "1793939906.637489"
@@ -592,12 +592,12 @@ func TestACopyOfACardWhoseHeaderReadsBackPastSlacksLimitIsCutOnAWord(t *testing.
 	if err := json.Unmarshal([]byte(lastPost(l).blocks), &blocks); err != nil {
 		t.Fatal(err)
 	}
-	head, isHeader := blocks.BlockSet[0].(*slack.HeaderBlock)
-	if !isHeader || runes(long) != 155 {
-		t.Fatalf("first block = %T for a %d-character header, want the copy's header", blocks.BlockSet[0], runes(long))
+	title, isSection := blocks.BlockSet[0].(*slack.SectionBlock)
+	if !isSection || title.BlockID != cardTitleBlock || runes(long) != 155 {
+		t.Fatalf("first block = %T for a %d-character header, want the copy's title as a bold section", blocks.BlockSet[0], runes(long))
 	}
-	if got := head.Text.Text; runes(got) > 150 || !strings.HasSuffix(got, "…") || !strings.HasPrefix(long, strings.TrimSuffix(got, "…")+" ") {
-		t.Fatalf("header = %q (%d characters), want the 155 cut on a word to at most 150", got, runes(got))
+	if got, _ := cardTitle(title); title.Text.Text != "*"+long+"*" || got != long {
+		t.Fatalf("title = %q, read back %q, want all 155 characters of %q in bold", title.Text.Text, got, long)
 	}
 }
 

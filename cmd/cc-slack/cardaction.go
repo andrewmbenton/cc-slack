@@ -1846,10 +1846,12 @@ func settledMessage(blocks []slack.Block, line string) (string, []slack.Block) {
 	title := ""
 	settled := make([]slack.Block, 0, len(blocks))
 	for _, block := range blocks {
-		switch b := block.(type) {
-		case *slack.HeaderBlock:
-			title = cmp.Or(headerEmoji.ReplaceAllString(b.Text.Text, ""), b.Text.Text)
+		if text, isTitle := cardTitle(block); isTitle {
+			title = cmp.Or(headerEmoji.ReplaceAllString(text, ""), text)
 			settled = append(settled, header(title))
+			continue
+		}
+		switch b := block.(type) {
 		case *slack.SectionBlock:
 			if strings.HasPrefix(b.BlockID, cardAskBlock) && b.Accessory != nil {
 				settled = append(settled, b)

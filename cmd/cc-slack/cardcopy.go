@@ -79,8 +79,8 @@ func copyLead(blocks []slack.Block, answers int) string {
 		return cardCopyLead
 	}
 	for _, block := range blocks {
-		if header, isHeader := block.(*slack.HeaderBlock); isHeader {
-			return header.Text.Text
+		if title, isTitle := cardTitle(block); isTitle {
+			return title
 		}
 	}
 	panic("a copied card always carries its header")
@@ -92,10 +92,12 @@ func copiedCard(card []slack.Block, ref permalinkRef) ([]slack.Block, int) {
 	var buttons, links []slack.BlockElement
 	picks := 0
 	for _, block := range card {
+		if text, isTitle := cardTitle(block); isTitle {
+			title = cmp.Or(title, text)
+			blocks = append(blocks, block)
+			continue
+		}
 		switch b := block.(type) {
-		case *slack.HeaderBlock:
-			title = cmp.Or(title, b.Text.Text)
-			blocks = append(blocks, b)
 		case *slack.SectionBlock:
 			row, isPick := copiedPick(b, ref)
 			if isPick {
@@ -131,9 +133,11 @@ func carriedCard(card []slack.Block, ref permalinkRef) slack.Block {
 		}
 	}
 	for _, block := range blocks {
+		if text, isTitle := cardTitle(block); isTitle {
+			title = cmp.Or(title, "*"+mrkdwnEscapes.Replace(text)+"*")
+			continue
+		}
 		switch b := block.(type) {
-		case *slack.HeaderBlock:
-			title = cmp.Or(title, "*"+mrkdwnEscapes.Replace(b.Text.Text)+"*")
 		case *slack.SectionBlock:
 			if b.Text != nil {
 				detail = cmp.Or(detail, b.Text.Text)

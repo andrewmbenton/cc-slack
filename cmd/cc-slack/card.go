@@ -24,6 +24,7 @@ const (
 	cardLinksBlock    = "card-links"
 	cardAskBlock      = "card-ask-"
 	cardWaitBlock     = "card-wait"
+	cardTitleBlock    = "card-title"
 	cardTappedBlock   = "card-tapped-"
 	cardTapNoteBlock  = cardTappedBlock + "note"
 	cardRowBlock      = "card-row-"
@@ -108,12 +109,13 @@ var (
 		"incident":  "🚨",
 		"done":      "✅",
 	}
-	cardAskStyles   = map[string]slack.Style{"": slack.StyleDefault, "primary": slack.StylePrimary, "danger": slack.StyleDanger}
-	askIDPattern    = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
-	mrkdwnEscapes   = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "|", "¦")
-	cardWordEscapes = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	slackToken      = regexp.MustCompile(`<[^<>\s][^<>]*>`)
-	cardJargon      = []struct {
+	cardAskStyles    = map[string]slack.Style{"": slack.StyleDefault, "primary": slack.StylePrimary, "danger": slack.StyleDanger}
+	askIDPattern     = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
+	mrkdwnEscapes    = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "|", "¦")
+	cardWordEscapes  = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	cardWordUnescape = strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">")
+	slackToken       = regexp.MustCompile(`<[^<>\s][^<>]*>`)
+	cardJargon       = []struct {
 		pattern *regexp.Regexp
 		mixed   bool
 		fix     string
@@ -1042,13 +1044,21 @@ func clipRunes(text string, limit int) string {
 func header(text string) slack.Block {
 	text = strings.TrimSpace(text)
 	if runes(text) > cardMaxHeaderLen {
-		cut := string([]rune(text)[:cardMaxHeaderLen-1])
-		if at := strings.LastIndex(cut, " "); at > 0 {
-			cut = cut[:at]
-		}
-		text = strings.TrimRight(cut, " ,;:—-") + "…"
+		return slack.NewSectionBlock(slack.NewTextBlockObject(slack.MarkdownType, "*"+cardWordEscapes.Replace(text)+"*", false, true), nil, nil, slack.SectionBlockOptionBlockID(cardTitleBlock))
 	}
 	return slack.NewHeaderBlock(slack.NewTextBlockObject(slack.PlainTextType, text, true, false))
+}
+
+func cardTitle(b slack.Block) (string, bool) {
+	switch t := b.(type) {
+	case *slack.HeaderBlock:
+		return t.Text.Text, true
+	case *slack.SectionBlock:
+		if t.BlockID == cardTitleBlock && t.Text != nil {
+			return cardWordUnescape.Replace(strings.TrimSuffix(strings.TrimPrefix(t.Text.Text, "*"), "*")), true
+		}
+	}
+	return "", false
 }
 
 func fitHeaders(blocks []slack.Block) []slack.Block {

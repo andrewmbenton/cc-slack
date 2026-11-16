@@ -688,3 +688,31 @@ func TestATapThatFailsIsReportedOnceAndNotTakenAgain(t *testing.T) {
 		t.Fatalf("replay cursor = %q, want it past the reported tap so it is not delivered and reported again", l.app.replay.latest())
 	}
 }
+
+func TestAQuestionSlackReadsBackPastTheHeaderLimitShowsWholeOnItsCopyAndItsSettledDraw(t *testing.T) {
+	question := "Now that a new replica gets its copy of the files alone, should a SandSQL writer still copy every file into its log each time it starts?"
+	readBack := ":raising_hand: " + question
+	if runes(question) > cardMaxTitleLen || runes(readBack) <= cardMaxHeaderLen {
+		t.Fatalf("question is %d characters, want one a card takes that Slack reads back past %d with its emoji's shortcode", runes(question), cardMaxHeaderLen)
+	}
+	l, id, _, thread := copyDaemon(t, cardBody("Merge the stack?", "merge it"))
+	const card = "1794825458.958309"
+	drawn := []slack.Block{
+		slack.NewHeaderBlock(slack.NewTextBlockObject(slack.PlainTextType, readBack, true, false)),
+		slack.NewActionBlock(cardActionsBlock, button(cardOptionAction+"0", "Bridge refuses at once")),
+	}
+	l.slack.add(id.DMChannelID, slack.Message{Msg: slack.Msg{Timestamp: card, Text: readBack, Blocks: slack.Blocks{BlockSet: drawn}}})
+	legacyCopy(t, l, id.permalink(id.DMChannelID, card, ""), thread)
+
+	var copied slack.Blocks
+	if err := json.Unmarshal([]byte(lastPost(l).blocks), &copied); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := cardTitle(copied.BlockSet[0]); got != readBack || strings.Contains(lastPost(l).blocks, "…") {
+		t.Fatalf("copy = %s, want the whole question %q", lastPost(l).blocks, readBack)
+	}
+	title, settled := settledMessage(drawn, "✓ *Bridge refuses at once* · answered")
+	if got, _ := cardTitle(settled[0]); title != question || got != question {
+		t.Fatalf("settled title %q drawn as %q, want the whole question %q", title, got, question)
+	}
+}
