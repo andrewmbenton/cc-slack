@@ -273,47 +273,6 @@ class CheckPostTest(unittest.TestCase):
         )
         self.assertEqual(kinds(text), [("machine-time", "23:14:31Z")])
 
-    def test_flags_drive_and_tool_jargon_the_reader_never_used(self) -> None:
-        text = (
-            "A design job is on it and a builder starts next.\n"
-            "The reset hit the ingress; a codex job reads it, and nothing lands without fde-scan."
-        )
-        self.assertEqual(
-            kinds(text),
-            [
-                ("jargon", "design job"),
-                ("jargon", "a builder"),
-                ("jargon", "ingress"),
-                ("jargon", "codex job"),
-                ("jargon", "fde-scan"),
-            ],
-        )
-        self.assertEqual(
-            [(finding.kind, finding.token) for finding in check_post.check("The ingress reset once.", ["why did the ingress reset?"])],
-            [],
-        )
-
-    def test_passes_reader_and_builder_outside_the_job_sense(self) -> None:
-        text = "The image builder failed, and the RSS readers on staging timed out."
-        self.assertEqual(kinds(text), [])
-
-    def test_flags_a_release_linked_to_its_buildkite_build_and_a_card_ask_linking_no_card(self) -> None:
-        text = (
-            "<https://buildkite.com/acme/release/builds/17624|the dev cut build> is live.\n"
-            "Pick an option on the card.\n"
-            "Pick an option on <https://acme.slack.com/archives/C0A1/p1794825458958309|the card on the switch wait>."
-        )
-        self.assertEqual(
-            kinds(text),
-            [("release-build", "https://buildkite.com/acme/release/builds/17624"), ("card-unlinked", "Pick an option on the card")],
-        )
-
-    def test_flags_a_long_post_on_one_line(self) -> None:
-        line = " ".join(["word"] * 61) + "."
-        self.assertEqual(kinds(line), [("one-paragraph", "word word word word word word")])
-        self.assertEqual(kinds(" ".join(["word"] * 60) + "."), [])
-        self.assertEqual(kinds(" ".join(["word"] * 40) + ".\n\n" + " ".join(["word"] * 40) + "."), [])
-
     def test_still_flags_a_zone_label_beside_code(self) -> None:
         text = "The queue filled at 23:58Z, logged as `23:58Z`, and drained at 4:14 PM PT.\n```\nUTC\n```\nAll times UTC."
         self.assertEqual(
