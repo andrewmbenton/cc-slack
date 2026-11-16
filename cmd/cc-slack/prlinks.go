@@ -40,8 +40,6 @@ func tapCallContext(ctx context.Context, op daemon.Op, body json.RawMessage) (co
 	return context.WithTimeout(ctx, tapCardPatience+tapPostPatience)
 }
 
-const prCardWords = "Words"
-
 var errCardCommandUnfinished = errors.New("the card command did not finish")
 
 var (

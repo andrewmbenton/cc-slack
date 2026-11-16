@@ -449,36 +449,6 @@ func (p *poller) reopenPRCard(ctx context.Context, id identity, card cardRef, wa
 	}
 }
 
-func (p *poller) prCardWords(ctx context.Context, id identity, m slack.Message) {
-	if !id.fromOperator(m) || !routedSubtypes[m.SubType] || m.ThreadTimestamp == "" || m.ThreadTimestamp == m.Timestamp || len(id.Config.PRLinks.CardCommand) == 0 {
-		return
-	}
-	waits, posted, ok := p.cards.prCardAt(id.DMChannelID, m.ThreadTimestamp, m.ThreadTimestamp)
-	if !ok {
-		return
-	}
-	card := cardRef{id.DMChannelID, m.ThreadTimestamp, posted.TS}
-	answer := newPRAnswer(posted.Card.refIDs()[0], waits, prCardWords, cardPress{m.Timestamp, "wrote in the card's thread"}, p.cards.heads(card))
-	p.taps.run(context.WithoutCancel(ctx), card.channel+"/"+card.ts, func(ctx context.Context) {
-		inTurn(ctx)
-		out, err := runCardCommand(ctx, id.Config.PRLinks.CardCommand, map[string]any{"answer": answer})
-		if err != nil {
-			p.log.Printf("PR card %s: your words in its thread reached no card command: %v", waits, err)
-			return
-		}
-		var said struct {
-			Taken []string `json:"taken"`
-		}
-		if err := json.Unmarshal(out, &said); err != nil {
-			p.log.Printf("PR card %s: the card command's reply %q: %v", waits, strings.TrimSpace(string(out)), err)
-			return
-		}
-		if len(said.Taken) > 0 {
-			p.reopenPRCard(ctx, id, card, waits, prCardWords, false)
-		}
-	})
-}
-
 func (p *poller) retryTaps(ctx context.Context, id identity) time.Time {
 	due, next := p.cards.owedTaps(p.now(), 2*prCardPatience)
 	for _, owed := range due {

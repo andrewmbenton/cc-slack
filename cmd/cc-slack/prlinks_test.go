@@ -1434,28 +1434,6 @@ func TestCardReopenTakesBackAPRCardAnswerGivenOnTheNamedSurfaceAndNeverASlackTap
 	}
 }
 
-func TestHisWordsUnderAnAnsweredPRCardGoToTheCardCommandAndAnApproveTheyTakeBackLeavesTheCardAskingAgain(t *testing.T) {
-	cmd := fakeCardCommand(t, []string{"acme/app#41"}, mergeRowCard())
-	l, _ := cardingDaemon(t, cmd.argv, "acme/app#41")
-	l.do(opDMStatus, map[string]any{"text": "#41 is green", "tap_prs": tapPR41})
-	card := awaitPRCards(t, l, testDM)[0]
-	tapMerge(t, l, card)
-	eventually(t, "the Merge tap to reach the card command", func() bool { return len(cmd.requests(t)) == 2 })
-	thread := cmp.Or(card.threadTS, card.ts)
-	if _, done := l.app.cards.answer(testDM, thread, testWaits); !done {
-		t.Fatal("the card took no Merge answer")
-	}
-	ts := fmt.Sprintf("%d.000001", slackTime(thread).Unix()+1)
-	l.slack.add(testDM, slack.Message{Msg: slack.Msg{Timestamp: ts, ThreadTimestamp: thread, User: testUser, Text: "wait, this keys the cache on the session"}})
-	l.app.poller.nudged(messageNudge{Channel: testDM, TS: ts, ThreadTS: thread})
-	want := `{"answer":{"action_ts":"` + ts + `","heads":{},"label":"Words","number":41,"repo":"acme/app","source":"wrote in the card's thread","waits":"merge:41:e718a74"}}`
-	eventually(t, "his words to reach the card command", func() bool { return slices.Contains(cmd.requests(t), want) })
-	l.app.poller.taps.busy.Wait()
-	if _, done := l.app.cards.answer(testDM, thread, testWaits); done {
-		t.Fatal("the card still holds the Merge his words took back, want it asking again")
-	}
-}
-
 func refusingCardCommand(t *testing.T, reason string, cards ...providedCard) (cardCommand, string) {
 	t.Helper()
 	dir := t.TempDir()
